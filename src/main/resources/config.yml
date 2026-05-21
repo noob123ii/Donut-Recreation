@@ -38,7 +38,7 @@ hider:
 
   # Misc things
   verbose-logging: false
-  bypass-permission: "donutpluginrecreation.hider.bypass"
+  bypass-permission: "donutrecreation.hider.bypass"
 
 # /offand / /punish
 punishments:
