@@ -1,0 +1,84 @@
+hider:
+  enabled: true
+
+  # World stuff
+  hide-below-y: 0
+  world-min-y: -64
+
+  reveal-initial-radius: 3
+  reveal-movement-radius: 2
+  reveal-edge-extra-radius: 1
+  sticky-radius: 10
+  max-revealed-chunks-per-player: 4096
+
+  recompute-period-ticks: 10
+  recompute-min-ticks: 2
+
+  flood-fill-budget: 80000
+  flood-fill-block-radius: 96
+  flood-fill-throttle-ticks: 10
+
+  # Entity stuff
+  entity-scan-chunk-radius: 8
+
+  # Geode stuff
+  geode-hide-enabled: true
+  geode-reveal-radius: 8
+  max-geode-chunks: 16384
+
+  block-natural-spawns-below-hide: true
+  block-all-spawns-below-hide: true
+
+  # Anti-xray noise
+  decoy-amethyst-enabled: true
+  decoy-amethyst-rate-bits: 11
+
+  salt-rotate-period-ticks: 12000
+  salt-rotate-stagger-ticks: 5
+
+  # Misc things
+  verbose-logging: false
+  bypass-permission: "donutpluginrecreation.hider.bypass"
+
+# /offand / /punish
+punishments:
+  Krypton:
+    BanTime: lifetime
+    ResetData: true
+  "ESP / Bariton":
+    BanTime: 1mo
+    ResetData: true
+  Macroing:
+    BanTime: 7d
+    ResetData: false
+  Cheating:
+    BanTime: 30d
+    ResetData: true
+  Xray:
+    BanTime: lifetime
+    ResetData: true
+  BaseFinding:
+    BanTime: 14d
+    ResetData: false
+
+# Alt-evasion policy:
+#   strict             — any shared IP triggers a 1-month ban
+#   new-accounts-only  — only ban first-time / young accounts; otherwise just /sus flag
+#   flag-only          — never auto-ban, only flag for staff review
+alt-ban-policy: new-accounts-only
+alt-ban-account-min-age-hours: 168   # 7 days
+
+sus:
+  gui-title: "&8Sus ??"
+  alert-sound: "ENTITY_EXPERIENCE_ORB_PICKUP"
+  cooldown-ms: 3000
+
+messages:
+  prefix: "&x&F&F&5&5&5&5&lSUS &8> "
+  no-permission: "&cYou do not have permission."
+  player-only: "&cOnly players can use this command."
+  player-not-found: "&cThat player is not online."
+  usage: "&cUsage: /sus <player> [reason]"
+  sus-sent: "&aSuspicion report sent for &f%target%&a."
+  sus-alert: "&c%reporter% &7marked &c%target% &7as suspicious&8: &f%reason%"
+  freecam-alert: "&c%player% &7failed anti-freecam &8(&f%check%&8)"

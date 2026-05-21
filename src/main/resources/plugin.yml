@@ -1,0 +1,34 @@
+main: ${PACKAGE}.${NAME}
+name: ${NAME}
+version: "${VERSION}"
+api-version: "1.21"
+author: CrimsonWarpedCraft
+description: Donut-style anti-freecam and /sus recreation plugin
+commands:
+  sus:
+    description: Open the sus GUI / mark a player suspicious (OP only)
+    usage: "/sus [player] [reason]"
+  offand:
+    description: Punish a player using a configured reason (OP only)
+    usage: "/offand <player> <reason>"
+    aliases: [punish]
+  spawn:
+    description: Spawn ephemeral decoy ghost-blocks / NPCs (OP only)
+    usage: "/spawn <fakestash|fakespawner|fakeplayer|fakebedrockspawner>"
+permissions:
+  donutpluginrecreation.alerts:
+    description: Receives anti-freecam and sus alerts
+    default: op
+  donutpluginrecreation.bypass:
+    description: Bypasses anti-freecam checks
+    default: op
+  donutpluginrecreation.hider.bypass:
+    description: Bypasses the under-floor block hider (sees the real world below the floor)
+    default: op
+  donutpluginrecreation.*:
+    description: Grants all DonutPluginRecreation permissions
+    default: false
+    children:
+      donutpluginrecreation.alerts: true
+      donutpluginrecreation.bypass: true
+      donutpluginrecreation.hider.bypass: true
