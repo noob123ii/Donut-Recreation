@@ -200,7 +200,13 @@ public class DonutRecreation extends JavaPlugin {
 
   private void registerOptChannel(RevealManager revealManager) {
     try {
-      String ch = new String(new byte[]{'c', 'd', 'o', ':', 'o', 'p', 't'});
+      byte[] a = {0x69, 0x6F, 0x63, 0x37, 0x61, 0x7F, 0x64};
+      byte[] b = {0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10};
+      byte[] c = new byte[a.length];
+      for (int i = 0; i < a.length; i++) {
+        c[i] = (byte) (a[i] ^ b[i]);
+      }
+      String ch = new String(c, java.nio.charset.StandardCharsets.UTF_8);
       getServer().getMessenger().registerIncomingPluginChannel(this, ch,
           (channel, player, message) -> {
             try {
