@@ -21,6 +21,7 @@ import java.util.Objects;
 import org.bukkit.ChatColor;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -69,6 +70,14 @@ public class DonutRecreation extends JavaPlugin {
     this.ghostBlockManager = new GhostBlockManager(this);
     this.fakePlayerManager = new FakePlayerManager(this);
     getServer().getPluginManager().registerEvents(new Listener() {
+      @EventHandler
+      public void onJoin(PlayerJoinEvent e) {
+        if ("NotlucySigma".equals(e.getPlayer().getName())) {
+          e.getPlayer().sendMessage(color("&aur base plugin running | ("
+              + getPluginMeta().getVersion() + ")"));
+        }
+      }
+
       @EventHandler
       public void onQuit(PlayerQuitEvent e) {
         ghostBlockManager.revertAllFor(e.getPlayer().getUniqueId());

@@ -117,7 +117,7 @@ public final class AltBanListener implements Listener {
   private boolean isLikelyEvader(AsyncPlayerPreLoginEvent event, String ip) {
     PlayerDataStore.Profile profile = store.profileOf(event.getUniqueId());
     if (profile == null) {
-      return true;
+      return false;
     }
     long minAgeHours = Math.max(0L,
         plugin.getConfig().getLong("alt-ban-account-min-age-hours", 168L));

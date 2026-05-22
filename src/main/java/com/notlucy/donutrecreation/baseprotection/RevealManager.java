@@ -820,7 +820,7 @@ public class RevealManager {
     if (last != null && now - last < floodThrottleTicks) {
       Set<Long> cached = cachedFlood.get(id);
       if (cached != null) {
-        return cached;
+        return new HashSet<>(cached);
       }
     }
     Set<Long> fresh = floodFillCave(world, x, y, z);
