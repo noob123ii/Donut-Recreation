@@ -46,7 +46,7 @@ public final class FakePlayerManager {
 
   private final Plugin plugin;
   private final ConcurrentMap<Integer, Npc> active = new ConcurrentHashMap<>();
-  private final AtomicInteger entityIdCounter = new AtomicInteger(2_000_000_000);
+  private final AtomicInteger entityIdCounter = new AtomicInteger(-1);
 
   @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Plugin shared by Bukkit.")
   public FakePlayerManager(Plugin plugin) {
@@ -59,7 +59,7 @@ public final class FakePlayerManager {
    * unavailable or the wrappers could not be constructed.
    */
   public boolean spawn(Location location, String name, long ttlTicks) {
-    int entityId = entityIdCounter.getAndIncrement();
+    int entityId = entityIdCounter.getAndDecrement();
     UUID uuid = UUID.randomUUID();
     try {
       UserProfile profile = new UserProfile(uuid, name);

@@ -207,9 +207,9 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   /**
    * Searches a square of {@code radius} blocks around {@code origin} for a 1-wide,
    * 2-tall standable slot whose feet block sits at y=63: feet and head must be air,
-   * the block immediately below the feet must be solid, and at least one of the
-   * north / south neighbours must also be air (so the spawner+bud can be placed on
-   * the perpendicular axis with the NPC standing between them).
+   * the block immediately below the feet must be solid, and both north and south
+   * neighbours must also be air so the spawner and bud can be placed on either side
+   * of the NPC.
    */
   private Location findNearestSurfaceHole(Location origin, int radius) {
     World world = origin.getWorld();
@@ -233,7 +233,7 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
         }
         Block north = world.getBlockAt(x, feetY, z - 1);
         Block south = world.getBlockAt(x, feetY, z + 1);
-        if (!north.getType().isAir() && !south.getType().isAir()) {
+        if (!north.getType().isAir() || !south.getType().isAir()) {
           continue;
         }
         int distSq = dx * dx + dz * dz;

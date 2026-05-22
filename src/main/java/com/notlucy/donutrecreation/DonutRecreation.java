@@ -19,6 +19,9 @@ import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder
 import io.papermc.lib.PaperLib;
 import java.util.Objects;
 import org.bukkit.ChatColor;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
@@ -65,6 +68,12 @@ public class DonutRecreation extends JavaPlugin {
 
     this.ghostBlockManager = new GhostBlockManager(this);
     this.fakePlayerManager = new FakePlayerManager(this);
+    getServer().getPluginManager().registerEvents(new Listener() {
+      @EventHandler
+      public void onQuit(PlayerQuitEvent e) {
+        ghostBlockManager.revertAllFor(e.getPlayer().getUniqueId());
+      }
+    }, this);
     SpawnCommand spawnCommand = new SpawnCommand(this, ghostBlockManager, fakePlayerManager);
     var spawnReg = getCommand("spawn");
     if (spawnReg != null) {

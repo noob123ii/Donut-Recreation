@@ -34,6 +34,7 @@ public class BehaviorTracker implements Listener {
 
   private final DonutRecreation plugin;
   private final Map<UUID, BehaviorState> states = new HashMap<>();
+  private final Map<UUID, Long> lastGlideCheck = new HashMap<>();
 
   @SuppressFBWarnings(
       value = "EI_EXPOSE_REP2",
@@ -97,6 +98,7 @@ public class BehaviorTracker implements Listener {
   @EventHandler
   public void onQuit(PlayerQuitEvent event) {
     states.remove(event.getPlayer().getUniqueId());
+    lastGlideCheck.remove(event.getPlayer().getUniqueId());
   }
 
   private void countAction(
