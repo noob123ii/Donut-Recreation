@@ -103,35 +103,63 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
 
   private void spawnFakeStash(Player player) {
     Location origin = player.getLocation().getBlock().getLocation();
-    int ox = origin.getBlockX() + 1;
-    int oy = origin.getBlockY();
-    int oz = origin.getBlockZ() + 1;
+    int ox = origin.getBlockX();
+    int oy = origin.getBlockY() - 2;
+    int oz = origin.getBlockZ();
     World world = player.getWorld();
-    BlockData stone = Material.STONE.createBlockData();
+    BlockData obsidian = Material.OBSIDIAN.createBlockData();
+    BlockData stoneBricks = Material.STONE_BRICKS.createBlockData();
     BlockData air = Material.AIR.createBlockData();
-    List<GhostBlockManager.GhostBlock> ghostList = new ArrayList<>(6 * 6 * 4);
+    List<GhostBlockManager.GhostBlock> ghostList = new ArrayList<>();
 
-    for (int dx = 0; dx < 6; dx++) {
-      for (int dz = 0; dz < 6; dz++) {
-        for (int dy = 0; dy < 4; dy++) {
-          boolean shell = (dx == 0 || dx == 5 || dz == 0 || dz == 5
-              || dy == 0 || dy == 3);
+    int w = 9;
+    int d = 7;
+    int h = 5;
+    for (int dx = 0; dx < w; dx++) {
+      for (int dz = 0; dz < d; dz++) {
+        for (int dy = 0; dy < h; dy++) {
+          boolean wall = (dx == 0 || dx == w - 1 || dz == 0 || dz == d - 1
+              || dy == 0 || dy == h - 1);
           Location loc = new Location(world, ox + dx, oy + dy, oz + dz);
-          ghostList.add(new GhostBlockManager.GhostBlock(loc, shell ? stone : air));
+          if (wall) {
+            ghostList.add(new GhostBlockManager.GhostBlock(loc, obsidian));
+          } else if (dy == 1) {
+            ghostList.add(new GhostBlockManager.GhostBlock(loc, stoneBricks));
+          } else {
+            ghostList.add(new GhostBlockManager.GhostBlock(loc, air));
+          }
         }
       }
     }
 
-    Chest leftChest = (Chest) Material.CHEST.createBlockData();
-    leftChest.setType(Chest.Type.LEFT);
-    leftChest.setFacing(BlockFace.NORTH);
-    Chest rightChest = (Chest) Material.CHEST.createBlockData();
-    rightChest.setType(Chest.Type.RIGHT);
-    rightChest.setFacing(BlockFace.NORTH);
-    Location leftLoc = new Location(world, ox + 2, oy + 1, oz + 2);
-    Location rightLoc = new Location(world, ox + 3, oy + 1, oz + 2);
-    ghostList.add(new GhostBlockManager.GhostBlock(leftLoc, leftChest));
-    ghostList.add(new GhostBlockManager.GhostBlock(rightLoc, rightChest));
+    int chestZ = oz + 1;
+    int chestY = oy + 2;
+    for (int i = 0; i < 4; i++) {
+      Chest left = (Chest) Material.CHEST.createBlockData();
+      left.setType(Chest.Type.LEFT);
+      left.setFacing(BlockFace.SOUTH);
+      Chest right = (Chest) Material.CHEST.createBlockData();
+      right.setType(Chest.Type.RIGHT);
+      right.setFacing(BlockFace.SOUTH);
+      int cx = ox + 2 + i * 2;
+      ghostList.add(new GhostBlockManager.GhostBlock(
+          new Location(world, cx, chestY, chestZ), left));
+      ghostList.add(new GhostBlockManager.GhostBlock(
+          new Location(world, cx + 1, chestY, chestZ), right));
+    }
+
+    ghostList.add(new GhostBlockManager.GhostBlock(
+        new Location(world, ox + 1, oy + 2, oz + 3),
+        Material.CRAFTING_TABLE.createBlockData()));
+    ghostList.add(new GhostBlockManager.GhostBlock(
+        new Location(world, ox + 1, oy + 2, oz + 4),
+        Material.FURNACE.createBlockData()));
+    ghostList.add(new GhostBlockManager.GhostBlock(
+        new Location(world, ox + 1, oy + 2, oz + 5),
+        Material.ANVIL.createBlockData()));
+    ghostList.add(new GhostBlockManager.GhostBlock(
+        new Location(world, ox + w - 2, oy + 2, oz + 3),
+        Material.ENCHANTING_TABLE.createBlockData()));
 
     long id = ghosts.send(player, ghostList, FIVE_MIN_TICKS, null);
     player.sendMessage(plugin.color(
@@ -168,10 +196,10 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   }
 
   private void spawnFakeBedrockSpawner(Player player) {
-    Hole hole = findBedrockHole(player.getLocation(), 12);
+    Hole hole = findBedrockHole(player.getLocation(), 32);
     if (hole == null) {
       player.sendMessage(plugin.color(
-          "&cNo enclosed 2-1 bedrock tunnel found within 12 blocks."));
+          "&cNo enclosed 2-1 bedrock tunnel found within 32 blocks."));
       return;
     }
     World world = hole.center.getWorld();
