@@ -21,6 +21,7 @@ import java.util.Objects;
 import org.bukkit.ChatColor;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -81,6 +82,15 @@ public class DonutRecreation extends JavaPlugin {
       @EventHandler
       public void onQuit(PlayerQuitEvent e) {
         ghostBlockManager.revertAllFor(e.getPlayer().getUniqueId());
+      }
+
+      @EventHandler
+      public void onInteract(PlayerInteractEvent e) {
+        if (e.getClickedBlock() != null
+            && ghostBlockManager.tryRevertOnInteract(e.getPlayer(),
+                e.getClickedBlock().getLocation())) {
+          e.setCancelled(true);
+        }
       }
     }, this);
     SpawnCommand spawnCommand = new SpawnCommand(this, ghostBlockManager, fakePlayerManager);

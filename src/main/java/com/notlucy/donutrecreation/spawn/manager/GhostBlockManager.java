@@ -32,6 +32,7 @@ public final class GhostBlockManager {
     public final List<Location> locations;
     public final long expiresAtTick;
     public Runnable onRevert;
+    public boolean revertOnInteract;
 
     public GhostGroup(UUID viewerId, List<Location> locations, long expiresAtTick) {
       this.viewerId = viewerId;
@@ -126,5 +127,37 @@ public final class GhostBlockManager {
         revert(id);
       }
     }
+  }
+
+  /** Marks a group so it reverts when its blocks are interacted with. */
+  public void setRevertOnInteract(long groupId, boolean revertOnInteract) {
+    GhostGroup group = groups.get(groupId);
+    if (group != null) {
+      group.revertOnInteract = revertOnInteract;
+    }
+  }
+
+  /**
+   * If {@code player} has an active interactable ghost group that contains
+   * {@code clicked}, reverts that group and returns true.
+   */
+  public boolean tryRevertOnInteract(Player player, Location clicked) {
+    if (clicked == null) {
+      return false;
+    }
+    for (Long id : new ArrayList<>(groups.keySet())) {
+      GhostGroup group = groups.get(id);
+      if (group == null || !group.revertOnInteract
+          || !group.viewerId.equals(player.getUniqueId())) {
+        continue;
+      }
+      for (Location loc : group.locations) {
+        if (loc.equals(clicked)) {
+          revert(id);
+          return true;
+        }
+      }
+    }
+    return false;
   }
 }

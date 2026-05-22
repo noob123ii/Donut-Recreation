@@ -13,6 +13,7 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.type.AmethystCluster;
 import org.bukkit.block.data.type.Chest;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -156,8 +157,8 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   private void spawnFakePlayer(Player player) {
     Location target = playerFacingLocation(player, 2.0);
     String fakeName = "Steve_" + (1000 + (int) (Math.random() * 9000));
-    boolean ok = npcs.spawn(target, fakeName, TEN_SEC_TICKS);
-    if (ok) {
+    int npcId = npcs.spawn(target, fakeName, TEN_SEC_TICKS);
+    if (npcId != -1) {
       player.sendMessage(plugin.color("&aFake player &f" + fakeName
           + " &aspawned at &f" + format(target) + "&a (despawns in 10s)."));
     } else {
@@ -167,83 +168,175 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   }
 
   private void spawnFakeBedrockSpawner(Player player) {
-    Location slot = findNearestSurfaceHole(player.getLocation(), 32);
-    if (slot == null) {
+    Hole hole = findBedrockHole(player.getLocation(), 12);
+    if (hole == null) {
       player.sendMessage(plugin.color(
-          "&cNo standable 1x2 slot found near you at y=63 within 32 blocks."));
+          "&cNo enclosed 2-1 bedrock tunnel found within 12 blocks."));
       return;
     }
-    World world = slot.getWorld();
-    int x = slot.getBlockX();
-    int y = slot.getBlockY();
-    int z = slot.getBlockZ();
+    World world = hole.center.getWorld();
+    int x = hole.center.getBlockX();
+    int y = hole.center.getBlockY();
+    int z = hole.center.getBlockZ();
+
+    Location spawnerLoc;
+    Location budLoc;
+    Location npcLoc = new Location(world, x + 0.5, y, z + 0.5);
+    if (hole.alongZ) {
+      spawnerLoc = new Location(world, x, y, z - 1);
+      budLoc = new Location(world, x, y, z + 1);
+      npcLoc.setYaw(180f);
+    } else {
+      spawnerLoc = new Location(world, x - 1, y, z);
+      budLoc = new Location(world, x + 1, y, z);
+      npcLoc.setYaw(90f);
+    }
+    npcLoc.setPitch(0f);
 
     BlockData spawner = Material.SPAWNER.createBlockData();
     BlockData bud = Material.SMALL_AMETHYST_BUD.createBlockData();
-
-    Location spawnerLoc = new Location(world, x, y, z - 1);
-    Location budLoc = new Location(world, x, y, z + 1);
-    Location npcLoc = new Location(world, x + 0.5, y, z + 0.5);
-    npcLoc.setYaw(0f);
-    npcLoc.setPitch(0f);
+    if (bud instanceof AmethystCluster) {
+      ((AmethystCluster) bud).setFacing(hole.budFacing);
+    }
 
     List<GhostBlockManager.GhostBlock> blocks = List.of(
         new GhostBlockManager.GhostBlock(spawnerLoc, spawner),
         new GhostBlockManager.GhostBlock(budLoc, bud));
 
-    long blockGroupId = ghosts.send(player, blocks, FIVE_MIN_TICKS, null);
-
     String fakeName = "Player_" + (1000 + (int) (Math.random() * 9000));
-    npcs.spawn(npcLoc, fakeName, FIVE_MIN_TICKS);
+    int npcId = npcs.spawn(npcLoc, fakeName, FIVE_MIN_TICKS, true);
+
+    long blockGroupId = ghosts.send(player, blocks, FIVE_MIN_TICKS, () -> {
+      if (npcId != -1) {
+        npcs.despawn(npcId);
+      }
+    });
+    ghosts.setRevertOnInteract(blockGroupId, true);
 
     player.sendMessage(plugin.color(
         "&aFake bedrock spawner set up at &f" + format(npcLoc)
             + " &a(group #" + blockGroupId
             + ", spawner @ " + format(spawnerLoc)
             + ", bud @ " + format(budLoc)
-            + ", NPC " + fakeName + ", reverts in 5min)."));
+            + ", NPC " + fakeName + " crawling, reverts in 5min)."));
+  }
+
+  private static final class Hole {
+    final Location center;
+    final boolean alongZ;
+    final BlockFace budFacing;
+
+    Hole(Location center, boolean alongZ, BlockFace budFacing) {
+      this.center = center;
+      this.alongZ = alongZ;
+      this.budFacing = budFacing;
+    }
   }
 
   /**
-   * Searches a square of {@code radius} blocks around {@code origin} for a 1-wide,
-   * 2-tall standable slot whose feet block sits at y=63: feet and head must be air,
-   * the block immediately below the feet must be solid, and both north and south
-   * neighbours must also be air so the spawner and bud can be placed on either side
-   * of the NPC.
+   * Searches around {@code origin} for a 1-block tall, 3-block long tunnel
+   * completely enclosed in bedrock where the two end walls are deepslate.
+   * Returns the nearest valid tunnel or null.
    */
-  private Location findNearestSurfaceHole(Location origin, int radius) {
+  private Hole findBedrockHole(Location origin, int radius) {
     World world = origin.getWorld();
     int ox = origin.getBlockX();
+    int oy = origin.getBlockY();
     int oz = origin.getBlockZ();
-    int feetY = 63;
     int best = Integer.MAX_VALUE;
-    Location bestLoc = null;
-    for (int dx = -radius; dx <= radius; dx++) {
-      for (int dz = -radius; dz <= radius; dz++) {
-        int x = ox + dx;
-        int z = oz + dz;
-        Block feet = world.getBlockAt(x, feetY, z);
-        Block head = world.getBlockAt(x, feetY + 1, z);
-        Block floor = world.getBlockAt(x, feetY - 1, z);
-        if (!feet.getType().isAir() || !head.getType().isAir()) {
-          continue;
-        }
-        if (!floor.getType().isSolid()) {
-          continue;
-        }
-        Block north = world.getBlockAt(x, feetY, z - 1);
-        Block south = world.getBlockAt(x, feetY, z + 1);
-        if (!north.getType().isAir() || !south.getType().isAir()) {
-          continue;
-        }
-        int distSq = dx * dx + dz * dz;
-        if (distSq < best) {
-          best = distSq;
-          bestLoc = new Location(world, x, feetY, z);
+    Hole bestHole = null;
+    for (int dy = -radius; dy <= radius; dy++) {
+      for (int dx = -radius; dx <= radius; dx++) {
+        for (int dz = -radius; dz <= radius; dz++) {
+          int x = ox + dx;
+          int y = oy + dy;
+          int z = oz + dz;
+          int distSq = dx * dx + dy * dy + dz * dz;
+          if (distSq >= best) {
+            continue;
+          }
+          if (isValidBedrockTunnelZ(world, x, y, z)) {
+            best = distSq;
+            bestHole = new Hole(new Location(world, x, y, z), true, BlockFace.NORTH);
+          }
+          if (isValidBedrockTunnelX(world, x, y, z)) {
+            best = distSq;
+            bestHole = new Hole(new Location(world, x, y, z), false, BlockFace.WEST);
+          }
         }
       }
     }
-    return bestLoc;
+    return bestHole;
+  }
+
+  private boolean isValidBedrockTunnelZ(World world, int x, int y, int z) {
+    if (!world.getBlockAt(x, y, z).getType().isAir()) {
+      return false;
+    }
+    if (world.getBlockAt(x, y, z - 1).getType() != Material.DEEPSLATE) {
+      return false;
+    }
+    if (world.getBlockAt(x, y, z + 1).getType() != Material.DEEPSLATE) {
+      return false;
+    }
+    for (int dz = -1; dz <= 1; dz++) {
+      if (world.getBlockAt(x, y - 1, z + dz).getType() != Material.BEDROCK) {
+        return false;
+      }
+      if (world.getBlockAt(x, y + 1, z + dz).getType() != Material.BEDROCK) {
+        return false;
+      }
+    }
+    for (int dz = -1; dz <= 1; dz++) {
+      if (world.getBlockAt(x - 1, y, z + dz).getType() != Material.BEDROCK) {
+        return false;
+      }
+      if (world.getBlockAt(x + 1, y, z + dz).getType() != Material.BEDROCK) {
+        return false;
+      }
+    }
+    if (world.getBlockAt(x, y, z - 2).getType() != Material.BEDROCK) {
+      return false;
+    }
+    if (world.getBlockAt(x, y, z + 2).getType() != Material.BEDROCK) {
+      return false;
+    }
+    return true;
+  }
+
+  private boolean isValidBedrockTunnelX(World world, int x, int y, int z) {
+    if (!world.getBlockAt(x, y, z).getType().isAir()) {
+      return false;
+    }
+    if (world.getBlockAt(x - 1, y, z).getType() != Material.DEEPSLATE) {
+      return false;
+    }
+    if (world.getBlockAt(x + 1, y, z).getType() != Material.DEEPSLATE) {
+      return false;
+    }
+    for (int dx = -1; dx <= 1; dx++) {
+      if (world.getBlockAt(x + dx, y - 1, z).getType() != Material.BEDROCK) {
+        return false;
+      }
+      if (world.getBlockAt(x + dx, y + 1, z).getType() != Material.BEDROCK) {
+        return false;
+      }
+    }
+    for (int dx = -1; dx <= 1; dx++) {
+      if (world.getBlockAt(x + dx, y, z - 1).getType() != Material.BEDROCK) {
+        return false;
+      }
+      if (world.getBlockAt(x + dx, y, z + 1).getType() != Material.BEDROCK) {
+        return false;
+      }
+    }
+    if (world.getBlockAt(x - 2, y, z).getType() != Material.BEDROCK) {
+      return false;
+    }
+    if (world.getBlockAt(x + 2, y, z).getType() != Material.BEDROCK) {
+      return false;
+    }
+    return true;
   }
 
   private Location playerFacingLocation(Player player, double distance) {

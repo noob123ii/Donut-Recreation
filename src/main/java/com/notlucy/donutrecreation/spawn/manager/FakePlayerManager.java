@@ -6,6 +6,7 @@ import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.protocol.player.UserProfile;
 import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
@@ -55,10 +56,20 @@ public final class FakePlayerManager {
 
   /**
    * Spawns a fake player at {@code location} with the given {@code name} and schedules
-   * cleanup after {@code ttlTicks}. Returns true on success, false if PacketEvents is
-   * unavailable or the wrappers could not be constructed.
+   * cleanup after {@code ttlTicks}. Returns the entity id on success, or -1 if PacketEvents
+   * is unavailable or the wrappers could not be constructed.
    */
-  public boolean spawn(Location location, String name, long ttlTicks) {
+  public int spawn(Location location, String name, long ttlTicks) {
+    return spawn(location, name, ttlTicks, false);
+  }
+
+  /**
+   * Spawns a fake player at {@code location} with the given {@code name} and schedules
+   * cleanup after {@code ttlTicks}. If {@code crawling} is true the NPC is sent with
+   * the SWIMMING pose so it renders as crawling. Returns the entity id on success, or -1
+   * on failure.
+   */
+  public int spawn(Location location, String name, long ttlTicks, boolean crawling) {
     int entityId = entityIdCounter.getAndDecrement();
     UUID uuid = UUID.randomUUID();
     try {
@@ -105,14 +116,33 @@ public final class FakePlayerManager {
         }
       }
 
+      if (crawling) {
+        try {
+          com.github.retrooper.packetevents.protocol.entity.data.EntityData<Byte> pose =
+              new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
+                  6,
+                  com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
+                  (byte) 3);
+          WrapperPlayServerEntityMetadata meta =
+              new WrapperPlayServerEntityMetadata(entityId, List.of(pose));
+          for (Player viewer : Bukkit.getOnlinePlayers()) {
+            try {
+              PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, meta);
+            } catch (Throwable ignored) {
+            }
+          }
+        } catch (Throwable ignored) {
+        }
+      }
+
       active.put(entityId, new Npc(entityId, uuid));
       Bukkit.getScheduler().runTaskLater(plugin,
           () -> despawn(entityId), Math.max(1L, ttlTicks));
-      return true;
+      return entityId;
     } catch (Throwable error) {
       plugin.getLogger().warning(
           "[spawn] failed to spawn fake player '" + name + "': " + error);
-      return false;
+      return -1;
     }
   }
 
