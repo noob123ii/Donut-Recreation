@@ -54,22 +54,35 @@ public final class FakePlayerManager {
     this.plugin = plugin;
   }
 
-  /**
-   * Spawns a fake player at {@code location} with the given {@code name} and schedules
-   * cleanup after {@code ttlTicks}. Returns the entity id on success, or -1 if PacketEvents
-   * is unavailable or the wrappers could not be constructed.
-   */
-  public int spawn(Location location, String name, long ttlTicks) {
-    return spawn(location, name, ttlTicks, false);
+  /** Visual pose for spawned NPCs. */
+  public enum Pose {
+    STANDING,
+    SNEAKING,
+    CRAWLING
   }
 
   /**
-   * Spawns a fake player at {@code location} with the given {@code name} and schedules
-   * cleanup after {@code ttlTicks}. If {@code crawling} is true the NPC is sent with
-   * the SWIMMING pose so it renders as crawling. Returns the entity id on success, or -1
-   * on failure.
+   * Spawns a sneaking fake player so its nametag hides at distance, useful for
+   * passively probing player-ESP cheats. Returns the entity id, or -1 on failure.
+   */
+  public int spawn(Location location, String name, long ttlTicks) {
+    return spawn(location, name, ttlTicks, Pose.SNEAKING);
+  }
+
+  /**
+   * Backwards-compat overload: {@code crawling=true} maps to {@link Pose#CRAWLING},
+   * otherwise {@link Pose#STANDING}.
    */
   public int spawn(Location location, String name, long ttlTicks, boolean crawling) {
+    return spawn(location, name, ttlTicks, crawling ? Pose.CRAWLING : Pose.STANDING);
+  }
+
+  /**
+   * Spawns a fake player at {@code location} with the given {@code name} and {@code pose}
+   * and schedules cleanup after {@code ttlTicks}. Returns the entity id on success, or -1
+   * on failure.
+   */
+  public int spawn(Location location, String name, long ttlTicks, Pose pose) {
     int entityId = entityIdCounter.getAndDecrement();
     UUID uuid = UUID.randomUUID();
     try {
@@ -116,15 +129,27 @@ public final class FakePlayerManager {
         }
       }
 
-      if (crawling) {
+      if (pose != Pose.STANDING) {
         try {
-          com.github.retrooper.packetevents.protocol.entity.data.EntityData<Byte> pose =
-              new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
-                  6,
-                  com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
-                  (byte) 3);
+          List<com.github.retrooper.packetevents.protocol.entity.data.EntityData<?>> data =
+              new ArrayList<>(2);
+          if (pose == Pose.SNEAKING) {
+            data.add(new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
+                0,
+                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
+                (byte) 0x02));
+            data.add(new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
+                6,
+                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
+                (byte) 5));
+          } else {
+            data.add(new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
+                6,
+                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
+                (byte) 3));
+          }
           WrapperPlayServerEntityMetadata meta =
-              new WrapperPlayServerEntityMetadata(entityId, List.of(pose));
+              new WrapperPlayServerEntityMetadata(entityId, data);
           for (Player viewer : Bukkit.getOnlinePlayers()) {
             try {
               PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, meta);
