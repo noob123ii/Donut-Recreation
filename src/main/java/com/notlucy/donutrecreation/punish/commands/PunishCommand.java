@@ -24,7 +24,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 /**
- * {@code /offand <player> <reason>} (alias {@code /punish}) — applies a configurable ban
+ * {@code /offend <player> <reason>} (alias {@code /punish}) — applies a configurable ban
  * with an optional data wipe and persists the ban into {@code playerdata.db}.
  *
  * <p>Reasons live under {@code punishments:} in {@code config.yml}, e.g.
@@ -59,7 +59,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     }
 
     if (args.length < 2) {
-      sender.sendMessage(plugin.color("&cUsage: /offand <player> <reason>"));
+      sender.sendMessage(plugin.color("&cUsage: /offend <player> <reason>"));
       sender.sendMessage(plugin.color("&7Reasons: &f" + String.join(", ", reasonKeys())));
       return true;
     }

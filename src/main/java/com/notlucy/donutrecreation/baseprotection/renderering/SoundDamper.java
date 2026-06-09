@@ -7,6 +7,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSo
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
@@ -15,10 +16,11 @@ import org.bukkit.entity.Player;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class SoundDamper {
 
-  private static final double SELF_SOUND_RADIUS_SQ = 4.0 * 4.0;
+  private static final double SELF_SOUND_RADIUS_SQ = 8.0 * 8.0;
 
   private final RevealManager rm;
   private final Map<World, Map<Integer, Entity>> entityIndex = new HashMap<>();
+  private final Object indexLock = new Object();
   private long indexTick = Long.MIN_VALUE;
 
   public SoundDamper(RevealManager rm) {
@@ -39,17 +41,21 @@ public final class SoundDamper {
     return false;
   }
 
+  private static final Set<String> LOGICAL_SOUND_PREFIXES = Set.of(
+      "block.piston", "block.dispenser", "block.dropper", "block.lever",
+      "block.button", "block.pressure", "block.redstone", "block.tripwire",
+      "block.wooden_door", "block.iron_door", "block.trapdoor",
+      "block.chest", "block.note_block", "block.comparator",
+      "block.repeater", "block.click", "block.wood", "block.stone",
+      "block.iron", "block.crafter", "block.spawner", "entity.ender_eye",
+      "entity.experience_orb", "item.flintandsteel", "ui.button");
+
   private boolean handlePositional(PacketSendEvent event, Player viewer) {
     WrapperPlayServerSoundEffect wrapper = new WrapperPlayServerSoundEffect(event);
-    var pos = wrapper.getEffectPosition();
+    var pos = wrapper.getPosition();
     if (pos == null) {
       return false;
     }
-    // Never suppress sounds emitted at (or essentially at) the viewer's own location —
-    // e.g. their own footsteps, jumps, elytra-equip, eating, etc. The vanilla server
-    // emits many of these as positional SOUND_EFFECT packets pinned to the player's
-    // current location, which would otherwise be silenced once the player descends
-    // below the hide floor.
     var vloc = viewer.getLocation();
     double dx = pos.getX() - vloc.getX();
     double dy = pos.getY() - vloc.getY();
@@ -57,9 +63,29 @@ public final class SoundDamper {
     if (dx * dx + dy * dy + dz * dz <= SELF_SOUND_RADIUS_SQ) {
       return false;
     }
-    if (rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ())) {
+    boolean unrevealed = rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ());
+    if (unrevealed) {
       event.setCancelled(true);
       return true;
+    }
+    int cx = ((int) Math.floor(pos.getX())) >> 4;
+    int cz = ((int) Math.floor(pos.getZ())) >> 4;
+    if (!rm.isRevealed(viewer, cx, cz) && isLogicalSound(wrapper.getSound())) {
+      event.setCancelled(true);
+      return true;
+    }
+    return false;
+  }
+
+  private boolean isLogicalSound(com.github.retrooper.packetevents.protocol.sound.Sound sound) {
+    if (sound == null) {
+      return false;
+    }
+    String key = sound.getSoundId().getKey().toLowerCase();
+    for (String prefix : LOGICAL_SOUND_PREFIXES) {
+      if (key.startsWith(prefix)) {
+        return true;
+      }
     }
     return false;
   }
@@ -67,8 +93,6 @@ public final class SoundDamper {
   private boolean handleEntity(PacketSendEvent event, Player viewer) {
     WrapperPlayServerEntitySoundEffect wrapper = new WrapperPlayServerEntitySoundEffect(event);
     int entityId = wrapper.getEntityId();
-    // Fast-path: a player's own ENTITY_SOUND_EFFECT (elytra flap/equip, damage, etc.)
-    // must never be suppressed for themselves regardless of where they are.
     if (entityId == viewer.getEntityId()) {
       return false;
     }
@@ -80,6 +104,13 @@ public final class SoundDamper {
       return false;
     }
     var loc = src.getLocation();
+    var vloc = viewer.getLocation();
+    double dx = loc.getX() - vloc.getX();
+    double dy = loc.getY() - vloc.getY();
+    double dz = loc.getZ() - vloc.getZ();
+    if (dx * dx + dy * dy + dz * dz <= SELF_SOUND_RADIUS_SQ) {
+      return false;
+    }
     if (rm.shouldSuppressEntityFor(viewer, loc.getX(), loc.getY(), loc.getZ())) {
       event.setCancelled(true);
       return true;
@@ -90,18 +121,22 @@ public final class SoundDamper {
   private Entity resolveEntity(Player viewer, int entityId) {
     World world = viewer.getWorld();
     long now = Bukkit.getCurrentTick();
-    if (now != indexTick) {
-      entityIndex.clear();
-      indexTick = now;
-    }
-    Map<Integer, Entity> byId = entityIndex.get(world);
-    if (byId == null) {
-      byId = new HashMap<>();
-      for (Entity e : world.getEntities()) {
-        byId.put(e.getEntityId(), e);
+    // This runs on PacketEvents' Netty IO threads (multiple), so the shared index must be
+    // guarded; an unsynchronised HashMap can corrupt or spin during concurrent resize.
+    synchronized (indexLock) {
+      if (now != indexTick) {
+        entityIndex.clear();
+        indexTick = now;
       }
-      entityIndex.put(world, byId);
+      Map<Integer, Entity> byId = entityIndex.get(world);
+      if (byId == null) {
+        byId = new HashMap<>();
+        for (Entity e : world.getEntities()) {
+          byId.put(e.getEntityId(), e);
+        }
+        entityIndex.put(world, byId);
+      }
+      return byId.get(entityId);
     }
-    return byId.get(entityId);
   }
 }

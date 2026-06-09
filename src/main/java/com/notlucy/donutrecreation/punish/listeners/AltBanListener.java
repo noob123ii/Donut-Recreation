@@ -62,10 +62,16 @@ public final class AltBanListener implements Listener {
 
     PlayerDataStore.BanRecord ownBan = store.activeBanFor(event.getUniqueId());
     if (ownBan != null) {
-      event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
-          "Banned: " + ownBan.reason
-              + (ownBan.expiresAt < 0 ? "" : " (expires "
-                  + Instant.ofEpochMilli(ownBan.expiresAt) + ")"));
+      String expires = ownBan.expiresAt < 0
+          ? "&cNever"
+          : "&f" + Instant.ofEpochMilli(ownBan.expiresAt);
+      String msg = plugin.color(
+          "&c&lYOU ARE BANNED\n\n"
+              + "&7Reason: &f" + ownBan.reason + "\n"
+              + "&7Duration: &f" + ownBan.banTime + "\n"
+              + "&7Expires: " + expires + "\n\n"
+              + "&7Appeal at &9discord.gg/example");
+      event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, msg);
       return;
     }
 
@@ -109,9 +115,12 @@ public final class AltBanListener implements Listener {
     } catch (Throwable ignored) {
     }
 
-    event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
-        EVADE_REASON + "\nDuration: 1 month\nLinked to: "
-            + (shared.name == null ? shared.uuid.toString() : shared.name));
+    String evadeMsg = plugin.color(
+        "&c&lBAN EVASION DETECTED\n\n"
+            + "&7Reason: &f" + EVADE_REASON + "\n"
+            + "&7Duration: &f1 month\n"
+            + "&7Linked to: &f" + (shared.name == null ? shared.uuid.toString() : shared.name));
+    event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, evadeMsg);
   }
 
   private boolean isLikelyEvader(AsyncPlayerPreLoginEvent event, String ip) {

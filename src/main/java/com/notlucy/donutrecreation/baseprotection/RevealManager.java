@@ -1,6 +1,7 @@
 package com.notlucy.donutrecreation.baseprotection;
 
 import com.notlucy.donutrecreation.DonutRecreation;
+import com.notlucy.donutrecreation.util.LogData;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
@@ -32,13 +33,29 @@ public class RevealManager {
 
   private final DonutRecreation plugin;
   private final ConcurrentMap<UUID, Set<Long>> revealed = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Set<Long>> revealedUpper = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Set<UUID>> hiddenEntities = new ConcurrentHashMap<>();
   private final Set<UUID> bypassed = ConcurrentHashMap.newKeySet();
+
+  // Tile-entity (container) positions discovered per chunk, and the positions currently
+  // rendered (real) for each viewer. Used to mask containers as AIR until the viewer is close.
+  private final ConcurrentMap<Long, Set<Long>> tilesByChunk = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Set<Long>> shownTiles = new ConcurrentHashMap<>();
+  private final BlockData airData = Material.AIR.createBlockData();
 
   private final ConcurrentMap<Long, Set<Long>> geodeByChunk = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Set<Long>> revealedGeodes = new ConcurrentHashMap<>();
   private final Set<Long> scannedGeodes = ConcurrentHashMap.newKeySet();
   private final ConcurrentLinkedDeque<Long> geodeInsertionOrder = new ConcurrentLinkedDeque<>();
+
+  // Tracks which chunks have actually been delivered to each player's client.
+  // The server's `world.isChunkLoaded` is not the same as the client having the
+  // chunk: at high render distance / 1000 players the client may not yet have a
+  // chunk that the server considers loaded. Sending a multi-block-change for a
+  // chunk the client doesn't have causes the packet to be dropped silently and
+  // the player ends up with no blocks rendered until they relog. PacketHider
+  // updates this map on chunk-data and unload-chunk packet sends.
+  private final ConcurrentMap<UUID, Set<Long>> deliveredChunks = new ConcurrentHashMap<>();
 
   private final ConcurrentMap<UUID, Long> lastFloodTick = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Set<Long>> cachedFlood = new ConcurrentHashMap<>();
@@ -46,6 +63,13 @@ public class RevealManager {
   private final ConcurrentMap<UUID, Integer> playerSalt = new ConcurrentHashMap<>();
 
   private final int floorY;
+  private final int upperY;
+  private final int upperRevealRadius;
+  private final boolean creativeSpectatorRadius;
+  private final boolean tileMaskEnabled;
+  private final int tileRenderDist;
+  private final long tileRenderDistSq;
+  private final int tileAboveRange;
   private final int worldMinY;
   private final int initialRadius;
   private final int movementRadius;
@@ -66,12 +90,21 @@ public class RevealManager {
   private final int recomputeMinTicks;
   private final int maxRevealedChunks;
   private final int maxGeodeChunks;
+  private final int maxRevealHidePerRecompute;
   private final BlockData[] fakeFloorPalette;
 
   public RevealManager(DonutRecreation plugin) {
     this.plugin = plugin;
     var cfg = plugin.getConfig();
     this.floorY = cfg.getInt("hider.hide-below-y", 0);
+    this.upperY = Math.max(this.floorY, cfg.getInt("hider.barrier-upper-y", 10));
+    this.upperRevealRadius = Math.max(1, cfg.getInt("hider.upper-reveal-radius", 4));
+    this.creativeSpectatorRadius =
+        cfg.getBoolean("hider.creative-spectator-radius-reveal", true);
+    this.tileMaskEnabled = cfg.getBoolean("hider.tile-entity-mask-enabled", true);
+    this.tileRenderDist = Math.max(0, cfg.getInt("hider.tile-entity-render-distance", 10));
+    this.tileRenderDistSq = (long) tileRenderDist * tileRenderDist;
+    this.tileAboveRange = Math.max(0, cfg.getInt("hider.tile-entity-mask-above-range", 100));
     this.worldMinY = cfg.getInt("hider.world-min-y", -64);
     this.initialRadius = cfg.getInt("hider.reveal-initial-radius", 3);
     this.movementRadius = cfg.getInt("hider.reveal-movement-radius", 2);
@@ -99,6 +132,8 @@ public class RevealManager {
         cfg.getInt("hider.max-revealed-chunks-per-player", 4096));
     this.maxGeodeChunks = Math.max(256,
         cfg.getInt("hider.max-geode-chunks", 16384));
+    this.maxRevealHidePerRecompute = Math.max(1,
+        cfg.getInt("hider.max-reveal-hide-per-recompute", 12));
 
     this.geodeOn = cfg.getBoolean("hider.geode-hide-enabled", true);
     this.geodeRadius = cfg.getInt("hider.geode-reveal-radius", 8);
@@ -108,7 +143,7 @@ public class RevealManager {
     this.floodThrottleTicks = cfg.getInt("hider.flood-fill-throttle-ticks", 10);
     this.entityScanChunkRadius = cfg.getInt("hider.entity-scan-chunk-radius", 8);
 
-    plugin.getLogger().info("[hider] up; floor=" + floorY
+    LogData.get().info("[hider] up; floor=" + floorY
         + " r=" + initialRadius + "/" + movementRadius
         + " sticky=" + stickyRadius
         + " flood=" + floodBudget + "/" + floodRadius
@@ -118,6 +153,15 @@ public class RevealManager {
 
   public int hideBelowY() {
     return floorY;
+  }
+
+  /** Upper barrier Y; the band [hideBelowY, upperBarrierY) is the first masked tier. */
+  public int upperBarrierY() {
+    return upperY;
+  }
+
+  public boolean tileMaskEnabled() {
+    return tileMaskEnabled;
   }
 
   public int worldMinY() {
@@ -202,21 +246,76 @@ public class RevealManager {
     if (isBypassed(player)) {
       return true;
     }
-    // If the player is themselves below the hide floor, always treat their own chunk
-    // and the immediate 3x3 ring around them as revealed. They've already entered the
-    // protected zone, so refusing to load the chunk they're standing in only produces
-    // the visual "blocks won't render" / "deepslate at feet" artifact when they cross
-    // chunk boundaries faster than the recompute scheduler can run (e.g. elytra).
-    var loc = player.getLocation();
-    if (loc.getY() < floorY) {
-      int pcx = loc.getBlockX() >> 4;
-      int pcz = loc.getBlockZ() >> 4;
-      if (Math.abs(chunkX - pcx) <= 1 && Math.abs(chunkZ - pcz) <= 1) {
-        return true;
-      }
-    }
     Set<Long> set = revealed.get(player.getUniqueId());
     return set != null && set.contains(chunkKey(chunkX, chunkZ));
+  }
+
+  /** Whether the upper band [hideBelowY, upperBarrierY) of this chunk is revealed for player. */
+  public boolean isUpperRevealed(Player player, int chunkX, int chunkZ) {
+    if (isBypassed(player)) {
+      return true;
+    }
+    if (upperY <= floorY) {
+      return true;
+    }
+    Set<Long> set = revealedUpper.get(player.getUniqueId());
+    return set != null && set.contains(chunkKey(chunkX, chunkZ));
+  }
+
+  // ---- Tile-entity (container) masking -------------------------------------------------
+
+  /** Records the container tile positions found in a chunk (called from the chunk rewrite). */
+  public void recordTiles(long chunkKey, Set<Long> positions) {
+    if (!tileMaskEnabled) {
+      return;
+    }
+    if (positions == null || positions.isEmpty()) {
+      tilesByChunk.remove(chunkKey);
+      return;
+    }
+    Set<Long> backing = ConcurrentHashMap.newKeySet(positions.size());
+    backing.addAll(positions);
+    tilesByChunk.put(chunkKey, backing);
+  }
+
+  public Set<Long> tilePositions(long chunkKey) {
+    return tilesByChunk.get(chunkKey);
+  }
+
+  /**
+   * Whether a tile entity at world-Y {@code tileY} falls inside the masking zone for a viewer
+   * standing at {@code viewerY}: always below the lower barrier, and up to
+   * {@code tile-entity-mask-above-range} blocks above it while the viewer is under the barrier.
+   */
+  public boolean tileInMaskZone(int viewerY, int tileY) {
+    if (!tileMaskEnabled) {
+      return false;
+    }
+    if (tileY < floorY) {
+      return true;
+    }
+    return viewerY <= floorY - 1 && tileY <= floorY + tileAboveRange;
+  }
+
+  /** Whether the viewer is close enough (3D) to render a tile at the given block centre. */
+  public boolean tileWithinRender(Player viewer, int x, int y, int z) {
+    Location loc = viewer.getLocation();
+    double dx = x + 0.5 - loc.getX();
+    double dy = y + 0.5 - loc.getY();
+    double dz = z + 0.5 - loc.getZ();
+    return dx * dx + dy * dy + dz * dz <= tileRenderDistSq;
+  }
+
+  /**
+   * Whether a tile at (x,y,z) must be masked as air for this viewer right now: it is in the
+   * masking zone for the viewer's depth and the viewer is beyond the render distance.
+   */
+  public boolean shouldMaskTile(Player viewer, int x, int y, int z) {
+    if (!tileMaskEnabled || isBypassed(viewer)) {
+      return false;
+    }
+    int viewerY = viewer.getLocation().getBlockY();
+    return tileInMaskZone(viewerY, y) && !tileWithinRender(viewer, x, y, z);
   }
 
   public void recordGeodeChunk(long chunkKey, Set<Long> positions) {
@@ -302,6 +401,11 @@ public class RevealManager {
       if (previous != null) {
         previous.clear();
       }
+      Set<Long> previousUpper = revealedUpper.remove(id);
+      if (previousUpper != null) {
+        previousUpper.clear();
+      }
+      shownTiles.remove(id);
       Set<UUID> hidden = hiddenEntities.remove(id);
       if (hidden != null && !hidden.isEmpty()) {
         for (Entity e : player.getWorld().getEntities()) {
@@ -319,23 +423,68 @@ public class RevealManager {
     int pcz = loc.getBlockZ() >> 4;
 
     if (shouldSkipRecompute(id, pcx, pcz, loc.getBlockY())) {
+      // Still run tile proximity each cycle so containers reveal/hide as the player walks
+      // within a chunk (where the chunk-level recompute is throttled out).
+      recomputeTiles(player, id, pcx, pcz);
       recomputeGeodeForPlayer(player);
       return;
     }
 
+    boolean radiusMode = creativeSpectatorRadius;
     int jitter = extraRevealJitter(id);
     Set<Long> desired = new HashSet<>();
-    if (loc.getBlockY() <= floorY) {
-      addSquare(desired, pcx, pcz, initialRadius + extraRevealRadius + jitter);
-      Set<Long> caves = throttledFlood(id, player.getWorld(),
-          loc.getBlockX(), loc.getBlockY(), loc.getBlockZ());
-      int edge = 1 + extraRevealRadius + jitter;
-      for (long key : caves) {
-        int cx = keyX(key);
-        int cz = keyZ(key);
-        for (int dx = -edge; dx <= edge; dx++) {
-          for (int dz = -edge; dz <= edge; dz++) {
-            desired.add(chunkKey(cx + dx, cz + dz));
+    int py = loc.getBlockY();
+    if (py < floorY) {
+      desired.add(chunkKey(pcx, pcz));
+      if (radiusMode) {
+        // Creative/Spectator: reveal a solid radius so chunks load even in solid rock,
+        // where the air-connected cave flood-fill would otherwise reveal nothing.
+        addSquare(desired, pcx, pcz,
+            Math.max(upperRevealRadius, Math.max(initialRadius, movementRadius)));
+      } else {
+        Set<Long> caves = throttledFlood(id, player.getWorld(),
+            loc.getBlockX(), py, loc.getBlockZ());
+        int edge = 1 + extraRevealRadius + jitter;
+        int checked = 0;
+        int passed = 0;
+        for (long key : caves) {
+          int cx = keyX(key);
+          int cz = keyZ(key);
+          for (int dx = -edge; dx <= edge; dx++) {
+            for (int dz = -edge; dz <= edge; dz++) {
+              int tcx = cx + dx;
+              int tcz = cz + dz;
+              checked++;
+              if (hasLineOfSightToFloor(player, tcx, tcz)) {
+                passed++;
+                desired.add(chunkKey(tcx, tcz));
+              }
+            }
+          }
+        }
+        int finalChecked = checked;
+        int finalPassed = passed;
+        LogData.get().fine(() -> "[hider] los " + player.getName()
+            + " caves=" + caves.size() + " checked=" + finalChecked
+            + " passed=" + finalPassed);
+      }
+    } else {
+      // Above the floor: do a proper LOS scan over a radius around the player.
+      // The previous implementation gated on `py <= floorY + 6` AND a single
+      // straight-down `canSeeFloor` check, which meant a player flying any
+      // higher, or sitting in a water column above an opening, could never
+      // reveal their own base. `hasLineOfSightToFloor` already aims at
+      // floorY-1 (the cave layer) and walks the ray through non-occluding
+      // blocks, so it works correctly through air and water.
+      int radius = Math.max(initialRadius, movementRadius);
+      if (radius > 0) {
+        for (int dx = -radius; dx <= radius; dx++) {
+          for (int dz = -radius; dz <= radius; dz++) {
+            int tcx = pcx + dx;
+            int tcz = pcz + dz;
+            if (hasLineOfSightToFloor(player, tcx, tcz)) {
+              desired.add(chunkKey(tcx, tcz));
+            }
           }
         }
       }
@@ -343,9 +492,11 @@ public class RevealManager {
 
     Set<Long> current = revealed.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
 
-    Set<Long> toReveal = new HashSet<>(desired);
+    Set<Long> toReveal = new HashSet<>(Math.max(8, desired.size()));
+    toReveal.addAll(desired);
     toReveal.removeAll(current);
-    Set<Long> toHide = new HashSet<>(current);
+    Set<Long> toHide = new HashSet<>(Math.max(8, current.size()));
+    toHide.addAll(current);
     toHide.removeAll(desired);
 
     if (stickyRadius > 0 && !toHide.isEmpty()) {
@@ -359,25 +510,204 @@ public class RevealManager {
       }
     }
 
-    if (!toReveal.isEmpty() || !toHide.isEmpty()) {
-      current.addAll(toReveal);
-      current.removeAll(toHide);
-      for (long k : toReveal) {
-        sendUnderworldBlocks(player, keyX(k), keyZ(k));
+    int sent = 0;
+    for (long k : toReveal) {
+      if (sent >= maxRevealHidePerRecompute) {
+        break;
       }
-      for (long k : toHide) {
-        hideUnderworldBlocks(player, keyX(k), keyZ(k));
+      sendUnderworldBlocks(player, keyX(k), keyZ(k));
+      current.add(k);
+      sent++;
+    }
+    for (long k : toHide) {
+      if (sent >= maxRevealHidePerRecompute) {
+        break;
       }
-      if (verbose) {
-        plugin.getLogger().info("[hider] " + player.getName()
-            + " +" + toReveal.size() + " -" + toHide.size());
-      }
+      hideUnderworldBlocks(player, keyX(k), keyZ(k));
+      current.remove(k);
+      sent++;
+    }
+    if (verbose && (!toReveal.isEmpty() || !toHide.isEmpty())) {
+      LogData.get().info("[hider] " + player.getName()
+          + " +" + toReveal.size() + " -" + toHide.size()
+          + " sent=" + sent);
     }
 
     enforceRevealedCap(current, pcx, pcz);
 
+    recomputeUpperBand(player, id, pcx, pcz, py);
+    recomputeTiles(player, id, pcx, pcz);
+
     recomputeGeodeForPlayer(player);
     updateEntityVisibility(player);
+  }
+
+  private boolean isRadiusGamemode(Player player) {
+    org.bukkit.GameMode gm = player.getGameMode();
+    return gm == org.bukkit.GameMode.CREATIVE || gm == org.bukkit.GameMode.SPECTATOR;
+  }
+
+  /**
+   * Reveals/hides the upper band [floorY, upperY) as a square radius around the viewer while
+   * they are below the upper barrier; hides it again once they climb back above it.
+   */
+  private void recomputeUpperBand(Player player, UUID id, int pcx, int pcz, int py) {
+    if (upperY <= floorY) {
+      return;
+    }
+    Set<Long> desiredUpper = new HashSet<>();
+    if (py < upperY) {
+      addSquare(desiredUpper, pcx, pcz, upperRevealRadius);
+    }
+    Set<Long> current = revealedUpper.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
+    Set<Long> toReveal = new HashSet<>(desiredUpper);
+    toReveal.removeAll(current);
+    Set<Long> toHide = new HashSet<>(current);
+    toHide.removeAll(desiredUpper);
+
+    if (stickyRadius > 0 && !toHide.isEmpty()) {
+      int r = stickyRadius;
+      Iterator<Long> it = toHide.iterator();
+      while (it.hasNext()) {
+        long k = it.next();
+        if (Math.abs(keyX(k) - pcx) <= r && Math.abs(keyZ(k) - pcz) <= r) {
+          it.remove();
+        }
+      }
+    }
+
+    if (toReveal.isEmpty() && toHide.isEmpty()) {
+      return;
+    }
+    for (long k : toReveal) {
+      sendUpperBand(player, keyX(k), keyZ(k), false);
+      current.add(k);
+    }
+    for (long k : toHide) {
+      sendUpperBand(player, keyX(k), keyZ(k), true);
+      current.remove(k);
+    }
+    enforceRevealedCap(current, pcx, pcz);
+  }
+
+  /**
+   * Sends real/fake block data for the upper band [floorY, upperY) of a chunk.
+   * {@code mask=true} masks the band with the fake-floor palette; {@code mask=false} restores
+   * the real blocks (tile-entity containers are masked separately by the packet layer).
+   */
+  private void sendUpperBand(Player player, int chunkX, int chunkZ, boolean mask) {
+    World world = player.getWorld();
+    if (!world.isChunkLoaded(chunkX, chunkZ)) {
+      return;
+    }
+    if (!isChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) {
+      return;
+    }
+    int lo = floorY;
+    int hi = upperY;
+    if (lo >= hi) {
+      return;
+    }
+    Chunk chunk = world.getChunkAt(chunkX, chunkZ);
+    int baseX = chunkX << 4;
+    int baseZ = chunkZ << 4;
+    BlockData[] palette = fakeFloorPalette;
+    int paletteLen = palette.length;
+    int salt = saltFor(player.getUniqueId());
+
+    final int batchSize = 4096;
+    Map<Location, BlockData> batch = new HashMap<>(batchSize);
+    int n = 0;
+    for (int x = 0; x < 16; x++) {
+      int wx = baseX + x;
+      for (int z = 0; z < 16; z++) {
+        int wz = baseZ + z;
+        for (int y = lo; y < hi; y++) {
+          BlockData data;
+          if (mask) {
+            int idx = Math.floorMod(scrambleHash(wx ^ salt, y, wz ^ salt), paletteLen);
+            data = palette[idx];
+          } else {
+            data = chunk.getBlock(x, y, z).getBlockData();
+          }
+          batch.put(new Location(world, wx, y, wz), data);
+          if (++n >= batchSize) {
+            player.sendMultiBlockChange(batch);
+            batch.clear();
+            n = 0;
+          }
+        }
+      }
+    }
+    if (!batch.isEmpty()) {
+      player.sendMultiBlockChange(batch);
+    }
+  }
+
+  /**
+   * Proximity reveal for tile-entity containers: shows their real block once the viewer comes
+   * within the render distance, and re-masks them as air when the viewer moves away. The
+   * initial chunk/band packets already air-mask far tiles at the packet layer; this handles the
+   * dynamic walk-up reveal that no chunk resend would otherwise cover.
+   */
+  private void recomputeTiles(Player player, UUID id, int pcx, int pcz) {
+    if (!tileMaskEnabled) {
+      return;
+    }
+    World world = player.getWorld();
+    Set<Long> shown = shownTiles.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
+    int viewerY = player.getLocation().getBlockY();
+    int chunkRange = Math.max(1, (tileRenderDist >> 4) + 1);
+
+    Map<Location, BlockData> reveals = new HashMap<>();
+    for (int dx = -chunkRange; dx <= chunkRange; dx++) {
+      for (int dz = -chunkRange; dz <= chunkRange; dz++) {
+        int cx = pcx + dx;
+        int cz = pcz + dz;
+        if (!world.isChunkLoaded(cx, cz)) {
+          continue;
+        }
+        Set<Long> tiles = tilesByChunk.get(chunkKey(cx, cz));
+        if (tiles == null || tiles.isEmpty()) {
+          continue;
+        }
+        for (long packed : tiles) {
+          int x = unpackX(packed);
+          int y = unpackY(packed);
+          int z = unpackPosZ(packed);
+          if (tileInMaskZone(viewerY, y) && tileWithinRender(player, x, y, z)) {
+            if (shown.add(packed)) {
+              reveals.put(new Location(world, x, y, z),
+                  world.getBlockAt(x, y, z).getBlockData());
+            }
+          }
+        }
+      }
+    }
+
+    Map<Location, BlockData> hides = new HashMap<>();
+    Iterator<Long> it = shown.iterator();
+    while (it.hasNext()) {
+      long packed = it.next();
+      int x = unpackX(packed);
+      int y = unpackY(packed);
+      int z = unpackPosZ(packed);
+      if (!(tileInMaskZone(viewerY, y) && tileWithinRender(player, x, y, z))) {
+        hides.put(new Location(world, x, y, z), airData);
+        it.remove();
+      }
+    }
+
+    if (!reveals.isEmpty()) {
+      player.sendMultiBlockChange(reveals);
+    }
+    if (!hides.isEmpty()) {
+      player.sendMultiBlockChange(hides);
+    }
+  }
+
+  private static int unpackPosZ(long p) {
+    return unpackZ(p);
   }
 
   public void recomputeGeodeForPlayer(Player player) {
@@ -425,17 +755,16 @@ public class RevealManager {
     if (toReveal.isEmpty() && toHide.isEmpty()) {
       return;
     }
-    current.addAll(toReveal);
-    current.removeAll(toHide);
-
     for (long ck : toReveal) {
       sendRealAmethyst(player, ck);
+      current.add(ck);
     }
     for (long ck : toHide) {
       sendFakeAmethyst(player, ck);
+      current.remove(ck);
     }
-    if (verbose && !toReveal.isEmpty()) {
-      plugin.getLogger().info("[geode] " + player.getName()
+    if (verbose && (!toReveal.isEmpty() || !toHide.isEmpty())) {
+      LogData.get().info("[geode] " + player.getName()
           + " +" + toReveal.size() + " -" + toHide.size());
     }
   }
@@ -443,6 +772,11 @@ public class RevealManager {
   private void sendRealAmethyst(Player player, long chunkKey) {
     Set<Long> positions = geodeByChunk.get(chunkKey);
     if (positions == null || positions.isEmpty()) {
+      return;
+    }
+    int cx = keyX(chunkKey);
+    int cz = keyZ(chunkKey);
+    if (!isChunkDeliveredTo(player.getUniqueId(), cx, cz)) {
       return;
     }
     World world = player.getWorld();
@@ -487,13 +821,23 @@ public class RevealManager {
     if (positions == null || positions.isEmpty()) {
       return;
     }
+    int cx = keyX(chunkKey);
+    int cz = keyZ(chunkKey);
+    if (!isChunkDeliveredTo(player.getUniqueId(), cx, cz)) {
+      return;
+    }
     World world = player.getWorld();
     Map<Location, BlockData> changes = new HashMap<>(positions.size());
-    BlockData fake = fakeAmethyst;
+    BlockData belowMask = fakeFloorPalette[0];
+    BlockData aboveMask = fakeAmethyst;
     for (long packed : positions) {
-      changes.put(new Location(world, unpackX(packed), unpackY(packed), unpackZ(packed)), fake);
+      int y = unpackY(packed);
+      BlockData mask = (y < floorY) ? belowMask : aboveMask;
+      changes.put(new Location(world, unpackX(packed), y, unpackZ(packed)), mask);
     }
-    player.sendMultiBlockChange(changes);
+    if (!changes.isEmpty()) {
+      player.sendMultiBlockChange(changes);
+    }
   }
 
   private static boolean isAmethyst(Material m) {
@@ -518,6 +862,7 @@ public class RevealManager {
     int pcz = playerLoc.getBlockZ() >> 4;
     int radius = entityScanChunkRadius;
     double blockRadius = radius * 16.0;
+    double proximitySq = 10.0 * 10.0;
 
     Iterable<Entity> nearby;
     try {
@@ -541,10 +886,25 @@ public class RevealManager {
         continue;
       }
       boolean below = l.getY() < floorY;
+      boolean isPlayer = e instanceof Player;
 
-      boolean shouldHide = above
-          ? below
-          : below && !isRevealed(player, l.getBlockX() >> 4, l.getBlockZ() >> 4);
+      boolean shouldHide;
+      if (isPlayer && below) {
+        shouldHide = true;
+      } else if (above) {
+        shouldHide = below;
+      } else {
+        shouldHide = below && !isRevealed(player, l.getBlockX() >> 4, l.getBlockZ() >> 4);
+      }
+
+      if (!shouldHide && below) {
+        double dx = l.getX() - playerLoc.getX();
+        double dy = l.getY() - playerLoc.getY();
+        double dz = l.getZ() - playerLoc.getZ();
+        if (dx * dx + dy * dy + dz * dz > proximitySq) {
+          shouldHide = true;
+        }
+      }
 
       if (shouldHide) {
         if (hidden.add(eid)) {
@@ -565,20 +925,42 @@ public class RevealManager {
     if (!world.isChunkLoaded(chunkX, chunkZ)) {
       return;
     }
+    // Skip the per-block patch if the client hasn't actually received this
+    // chunk yet: the chunk packet itself will arrive later and PacketHider
+    // will pass through real blocks because we'll be in the `revealed` set
+    // by then. Sending an MBC now just gets silently dropped, which is the
+    // root cause of the "caves don't load until I relog" bug.
+    if (!isChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) {
+      return;
+    }
     Chunk chunk = world.getChunkAt(chunkX, chunkZ);
     int minY = Math.max(worldMinY, world.getMinHeight());
     int maxY = floorY;
     int baseX = chunkX << 4;
     int baseZ = chunkZ << 4;
+    BlockData[] palette = fakeFloorPalette;
+    int paletteLen = palette.length;
+    int salt = saltFor(player.getUniqueId());
 
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
     int n = 0;
     for (int x = 0; x < 16; x++) {
+      int wx = baseX + x;
       for (int z = 0; z < 16; z++) {
+        int wz = baseZ + z;
         for (int y = minY; y < maxY; y++) {
-          batch.put(new Location(world, baseX + x, y, baseZ + z),
-              chunk.getBlock(x, y, z).getBlockData());
+          BlockData real = chunk.getBlock(x, y, z).getBlockData();
+          Material type = real.getMaterial();
+          int idx = Math.floorMod(scrambleHash(wx ^ salt, y, wz ^ salt), paletteLen);
+          if ((type == Material.VOID_AIR || type == Material.AIR) && y <= minY + 2) {
+            real = palette[idx];
+          }
+          // Skip if the block already matches the mask the client currently sees
+          if (real.equals(palette[idx])) {
+            continue;
+          }
+          batch.put(new Location(world, wx, y, wz), real);
           if (++n >= batchSize) {
             player.sendMultiBlockChange(batch);
             batch.clear();
@@ -595,6 +977,9 @@ public class RevealManager {
   public void hideUnderworldBlocks(Player player, int chunkX, int chunkZ) {
     World world = player.getWorld();
     if (!world.isChunkLoaded(chunkX, chunkZ)) {
+      return;
+    }
+    if (!isChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) {
       return;
     }
     int minY = Math.max(worldMinY, world.getMinHeight());
@@ -689,7 +1074,7 @@ public class RevealManager {
       }
     }
     if (verbose && budget <= 0) {
-      plugin.getLogger().info("[hider] flood ran out of budget at " + chunks.size() + " chunks");
+      LogData.get().info("[hider] flood ran out of budget at " + chunks.size() + " chunks");
     }
     return chunks;
   }
@@ -698,6 +1083,65 @@ public class RevealManager {
     return ((long) (x & 0x3FFFFFF) << 38)
         | ((long) (z & 0x3FFFFFF) << 12)
         | (y & 0xFFF);
+  }
+
+  private boolean hasLineOfSightToFloor(Player player, int chunkX, int chunkZ) {
+    Location eye = player.getEyeLocation();
+    World world = eye.getWorld();
+    if (world == null) {
+      return false;
+    }
+    int pcx = eye.getBlockX() >> 4;
+    int pcz = eye.getBlockZ() >> 4;
+    double targetX = (chunkX << 4) + 8.0;
+    // Aim just under the floor: floorY itself is solid deepslate, so a ray that
+    // ends there is blocked by the very block we're trying to reveal beneath.
+    // Sampling the cave layer directly is far less restrictive and makes nearby
+    // chunks load before the player is pressed right up against the floor.
+    double targetY = Math.min(eye.getY(), floorY - 1);
+    double targetZ = (chunkZ << 4) + 8.0;
+
+    double dx = targetX - eye.getX();
+    double dy = targetY - eye.getY();
+    double dz = targetZ - eye.getZ();
+    double distSq = dx * dx + dy * dy + dz * dz;
+    if (distSq < 0.0001) {
+      return true;
+    }
+    double dist = Math.sqrt(distSq);
+    double step = 1.0;
+    int steps = (int) (dist / step);
+    if (steps <= 0) {
+      return true;
+    }
+    double nx = dx / dist * step;
+    double ny = dy / dist * step;
+    double nz = dz / dist * step;
+
+    double x = eye.getX();
+    double y = eye.getY();
+    double z = eye.getZ();
+    for (int i = 0; i < steps; i++) {
+      x += nx;
+      y += ny;
+      z += nz;
+      int bx = (int) Math.floor(x);
+      int by = (int) Math.floor(y);
+      int bz = (int) Math.floor(z);
+      Block stepBlock = world.getBlockAt(bx, by, bz);
+      if (stepBlock.getType().isOccluding()) {
+        if (verbose) {
+          // Tag the wall block that aborted the LOS so the operator can map
+          // which deepslate column is preventing reveal of an adjacent chunk.
+          LogData.get().info("[hider-los] " + player.getName()
+              + " blocked target=" + chunkX + "," + chunkZ
+              + " wall=" + stepBlock.getType() + " at " + bx + "," + by + "," + bz
+              + " (step " + i + "/" + steps + ")");
+        }
+        return false;
+      }
+    }
+    return true;
   }
 
   private static boolean isPassable(Block block) {
@@ -716,9 +1160,19 @@ public class RevealManager {
     }
   }
 
+  /** Clears the recompute throttle stamp so the next recompute always runs (e.g. on gamemode
+   * change, where the player's position is unchanged but their view must be rebuilt). */
+  public void invalidateRecompute(UUID id) {
+    if (id != null) {
+      lastRecomputeStamp.remove(id);
+    }
+  }
+
   public void removePlayer(Player player) {
     UUID id = player.getUniqueId();
     revealed.remove(id);
+    revealedUpper.remove(id);
+    shownTiles.remove(id);
     revealedGeodes.remove(id);
     hiddenEntities.remove(id);
     bypassed.remove(id);
@@ -726,6 +1180,41 @@ public class RevealManager {
     cachedFlood.remove(id);
     lastRecomputeStamp.remove(id);
     playerSalt.remove(id);
+    deliveredChunks.remove(id);
+  }
+
+  /** Records that the client of {@code id} has received the full chunk packet for
+   * (chunkX, chunkZ). Called from PacketHider after a CHUNK_DATA dispatch. */
+  public void markChunkDelivered(UUID id, int chunkX, int chunkZ) {
+    if (id == null) {
+      return;
+    }
+    deliveredChunks.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet())
+        .add(chunkKey(chunkX, chunkZ));
+  }
+
+  /** Removes the (chunkX, chunkZ) record on UNLOAD_CHUNK so we don't send block
+   * changes for chunks the client has thrown away. */
+  public void markChunkUnloaded(UUID id, int chunkX, int chunkZ) {
+    if (id == null) {
+      return;
+    }
+    Set<Long> set = deliveredChunks.get(id);
+    if (set != null) {
+      set.remove(chunkKey(chunkX, chunkZ));
+    }
+  }
+
+  /** Whether the client of {@code id} currently has (chunkX, chunkZ) loaded. If
+   * false, multi-block-change packets for that chunk would be dropped client
+   * side; callers should skip them and rely on PacketHider rewriting the chunk
+   * packet itself when it is eventually delivered. */
+  public boolean isChunkDeliveredTo(UUID id, int chunkX, int chunkZ) {
+    if (id == null) {
+      return false;
+    }
+    Set<Long> set = deliveredChunks.get(id);
+    return set != null && set.contains(chunkKey(chunkX, chunkZ));
   }
 
   public int saltFor(UUID id) {
@@ -777,19 +1266,17 @@ public class RevealManager {
       return false;
     }
     long now = currentTick();
-    long[] stamp = lastRecomputeStamp.get(id);
-    if (stamp != null
+    long[] stamp = lastRecomputeStamp.computeIfAbsent(id, k -> new long[4]);
+    if (stamp[0] != 0
         && now - stamp[0] < recomputeMinTicks
         && stamp[1] == pcx && stamp[2] == pcz
         && Math.abs(stamp[3] - py) <= 1) {
       return true;
     }
-    long[] fresh = stamp == null ? new long[4] : stamp;
-    fresh[0] = now;
-    fresh[1] = pcx;
-    fresh[2] = pcz;
-    fresh[3] = py;
-    lastRecomputeStamp.put(id, fresh);
+    stamp[0] = now;
+    stamp[1] = pcx;
+    stamp[2] = pcz;
+    stamp[3] = py;
     return false;
   }
 
@@ -829,12 +1316,17 @@ public class RevealManager {
     return fresh;
   }
 
+  private static volatile boolean currentTickSupported = true;
+
   private static long currentTick() {
-    try {
-      return Bukkit.getCurrentTick();
-    } catch (NoSuchMethodError ignored) {
-      return System.nanoTime() / 50_000_000L;
+    if (currentTickSupported) {
+      try {
+        return Bukkit.getCurrentTick();
+      } catch (NoSuchMethodError ignored) {
+        currentTickSupported = false;
+      }
     }
+    return System.nanoTime() / 50_000_000L;
   }
 
   private static int scrambleHash(int x, int y, int z) {
@@ -849,5 +1341,6 @@ public class RevealManager {
     long ck = chunkKey(chunkX, chunkZ);
     scannedGeodes.remove(ck);
     geodeByChunk.remove(ck);
+    tilesByChunk.remove(ck);
   }
 }

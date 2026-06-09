@@ -1,5 +1,6 @@
 package com.notlucy.donutrecreation.punish.store;
 
+import com.notlucy.donutrecreation.util.LogData;
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -14,7 +15,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.logging.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -78,7 +78,6 @@ public final class PlayerDataStore {
   }
 
   private final File file;
-  private final Logger log;
   private final ConcurrentMap<UUID, BanRecord> bans = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Deque<UUID>> ipToUuids = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
@@ -86,9 +85,8 @@ public final class PlayerDataStore {
   private volatile boolean dirty = false;
   private volatile int saverTaskId = -1;
 
-  public PlayerDataStore(File dataFolder, Logger log) {
+  public PlayerDataStore(File dataFolder) {
     this.file = new File(dataFolder, "playerdata.db");
-    this.log = log;
     load();
   }
 
@@ -160,6 +158,21 @@ public final class PlayerDataStore {
       return fresh;
     });
     profile.fingerprint = fingerprint;
+    dirty = true;
+  }
+
+  public void reload() {
+    bans.clear();
+    ipToUuids.clear();
+    profiles.clear();
+    load();
+  }
+
+  public void removeBan(UUID uuid) {
+    if (uuid == null) {
+      return;
+    }
+    bans.remove(uuid);
     dirty = true;
   }
 
@@ -382,12 +395,14 @@ public final class PlayerDataStore {
 
       try {
         File parent = file.getParentFile();
-        if (parent != null && !parent.exists()) {
-          parent.mkdirs();
+        if (parent != null && !parent.exists()
+            && !parent.mkdirs() && !parent.exists()) {
+          LogData.get().warning("[offend] could not create dir " + parent);
+          return;
         }
         yaml.save(file);
       } catch (IOException error) {
-        log.warning("[offand] failed to write playerdata.db: " + error);
+        LogData.get().warning("[offend] failed to write playerdata.db: " + error);
       }
     }
   }

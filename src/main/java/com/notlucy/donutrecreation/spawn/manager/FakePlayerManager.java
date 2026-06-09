@@ -10,6 +10,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
+import com.notlucy.donutrecreation.util.LogData;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -140,13 +141,13 @@ public final class FakePlayerManager {
                 (byte) 0x02));
             data.add(new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
                 6,
-                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
-                (byte) 5));
-          } else {
+                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.ENTITY_POSE,
+                com.github.retrooper.packetevents.protocol.entity.pose.EntityPose.CROUCHING));
+          } else if (pose == Pose.CRAWLING) {
             data.add(new com.github.retrooper.packetevents.protocol.entity.data.EntityData<>(
                 6,
-                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.BYTE,
-                (byte) 3));
+                com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes.ENTITY_POSE,
+                com.github.retrooper.packetevents.protocol.entity.pose.EntityPose.SWIMMING));
           }
           WrapperPlayServerEntityMetadata meta =
               new WrapperPlayServerEntityMetadata(entityId, data);
@@ -165,7 +166,7 @@ public final class FakePlayerManager {
           () -> despawn(entityId), Math.max(1L, ttlTicks));
       return entityId;
     } catch (Throwable error) {
-      plugin.getLogger().warning(
+      LogData.get().warning(
           "[spawn] failed to spawn fake player '" + name + "': " + error);
       return -1;
     }

@@ -1,0 +1,118 @@
+logging:
+  enabled: true
+  fine: false
+
+hider:
+  enabled: true
+
+  # World stuff
+  # Two-tier barrier:
+  #   hide-below-y  (lower barrier): blocks below this are masked and only revealed via the
+  #                                  cave/line-of-sight base-protection logic once you reach it.
+  #   barrier-upper-y (upper barrier): the band [hide-below-y, barrier-upper-y) is masked while
+  #                                  you are at or above barrier-upper-y, and revealed (radius
+  #                                  around you) once you drop below it. Set equal to hide-below-y
+  #                                  to disable the upper band entirely.
+  hide-below-y: 0
+  barrier-upper-y: 10
+  upper-reveal-radius: 4
+  world-min-y: -64
+
+  # Creative/Spectator reveal a solid radius around themselves (instead of relying on
+  # air-connected cave flood-fill) so chunks always load while flying through solid blocks.
+  creative-spectator-radius-reveal: true
+
+  reveal-initial-radius: 3
+  reveal-movement-radius: 2
+  reveal-edge-extra-radius: 1
+  sticky-radius: 10
+  max-revealed-chunks-per-player: 4096
+
+  # Tile-entity (chest/shulker/hopper/spawner/...) masking. Containers below the barrier are
+  # shown as AIR until the viewer is within tile-entity-render-distance blocks. While the viewer
+  # is below the lower barrier, tile entities up to tile-entity-mask-above-range blocks ABOVE
+  # hide-below-y are also masked.
+  tile-entity-mask-enabled: true
+  tile-entity-render-distance: 10
+  tile-entity-mask-above-range: 100
+
+  recompute-period-ticks: 10
+  recompute-min-ticks: 2
+
+  flood-fill-budget: 80000
+  flood-fill-block-radius: 96
+  flood-fill-throttle-ticks: 10
+
+  # Entity stuff
+  entity-scan-chunk-radius: 8
+
+  # Geode stuff
+  geode-hide-enabled: true
+  geode-reveal-radius: 8
+  max-geode-chunks: 16384
+
+  block-natural-spawns-below-hide: true
+  block-all-spawns-below-hide: true
+
+  # Anti-xray noise
+  decoy-amethyst-enabled: true
+  decoy-amethyst-rate-bits: 11
+
+  salt-rotate-period-ticks: 12000
+  salt-rotate-stagger-ticks: 5
+
+  # Void fall protection (Y <= -65)
+  void-redirect-server: ""          # BungeeCord server to redirect to; empty = teleport
+  void-spawn-world: "world"
+  void-spawn-x: 0
+  void-spawn-y: 100
+  void-spawn-z: 0
+  void-spawn-yaw: 0
+  void-spawn-pitch: 0
+
+  # Misc things
+  verbose-logging: false
+  bypass-permission: "donutrecreation.hider.bypass"
+
+# /offend / /punish
+punishments:
+  Krypton:
+    BanTime: lifetime
+    ResetData: true
+  "ESP / Bariton":
+    BanTime: 1mo
+    ResetData: true
+  Macroing:
+    BanTime: 7d
+    ResetData: false
+  Cheating:
+    BanTime: 30d
+    ResetData: true
+  Xray:
+    BanTime: lifetime
+    ResetData: true
+  BaseFinding:
+    BanTime: 14d
+    ResetData: false
+
+# Alt-evasion policy:
+#   strict             — any shared IP triggers a 1-month ban
+#   new-accounts-only  — only ban first-time / young accounts; otherwise just /sus flag
+#   flag-only          — never auto-ban, only flag for staff review
+alt-ban-policy: new-accounts-only
+alt-ban-account-min-age-hours: 168   # 7 days
+
+sus:
+  gui-title: "&8Sus ??"
+  alert-sound: "ENTITY_EXPERIENCE_ORB_PICKUP"
+  cooldown-ms: 3000
+
+messages:
+  prefix: "&x&F&F&5&5&5&5&lSUS &8> "
+  no-permission: "&cYou do not have permission."
+  player-only: "&cOnly players can use this command."
+  player-not-found: "&cThat player is not online."
+  usage: "&cUsage: /sus <player> [reason]"
+  sus-sent: "&aSuspicion report sent for &f%target%&a."
+  sus-alert: "&c%reporter% &7marked &c%target% &7as suspicious&8: &f%reason%"
+  freecam-alert: "&c%player% &7failed anti-freecam &8(&f%check%&8)"

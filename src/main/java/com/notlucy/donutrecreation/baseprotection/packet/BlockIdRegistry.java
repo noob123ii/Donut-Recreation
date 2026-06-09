@@ -16,22 +16,26 @@ public final class BlockIdRegistry {
       StateTypes.AMETHYST_CLUSTER,
       StateTypes.SMALL_AMETHYST_BUD,
       StateTypes.MEDIUM_AMETHYST_BUD,
-      StateTypes.LARGE_AMETHYST_BUD);
+      StateTypes.LARGE_AMETHYST_BUD,
+      StateTypes.CALCITE,
+      StateTypes.SMOOTH_BASALT);
 
   private BitSet amethyst;
   private int amethystLen;
   private int stoneId;
+  private int airId;
   private int floorId;
-  private int decoyAmethystId;
+  private int decoyClusterId;
   private int[] floorPalette;
   private ClientVersion version;
 
   public void rebuild(ClientVersion version) {
     this.version = version;
     this.stoneId = WrappedBlockState.getDefaultState(version, StateTypes.STONE).getGlobalId();
+    this.airId = WrappedBlockState.getDefaultState(version, StateTypes.AIR).getGlobalId();
     this.floorId = WrappedBlockState.getDefaultState(version, StateTypes.DEEPSLATE).getGlobalId();
-    this.decoyAmethystId = WrappedBlockState
-        .getDefaultState(version, StateTypes.AMETHYST_BLOCK).getGlobalId();
+    this.decoyClusterId = WrappedBlockState
+        .getDefaultState(version, StateTypes.AMETHYST_CLUSTER).getGlobalId();
     this.floorPalette = buildFloorPalette(version);
 
     BitSet bits = new BitSet(8192);
@@ -62,12 +66,16 @@ public final class BlockIdRegistry {
     return stoneId;
   }
 
+  public int airId() {
+    return airId;
+  }
+
   public int floorId() {
     return floorId;
   }
 
-  public int decoyAmethystId() {
-    return decoyAmethystId;
+  public int decoyClusterId() {
+    return decoyClusterId;
   }
 
   public int floorIdAt(int salt, int x, int y, int z) {

@@ -1,15 +1,40 @@
+logging:
+  enabled: true
+  fine: true
+
 hider:
   enabled: true
 
   # World stuff
+  # Two-tier barrier:
+  #   hide-below-y  (lower barrier): blocks below this are masked and only revealed via the
+  #                                  cave/line-of-sight base-protection logic once you reach it.
+  #   barrier-upper-y (upper barrier): the band [hide-below-y, barrier-upper-y) is masked while
+  #                                  you are at or above barrier-upper-y, and revealed (radius
+  #                                  around you) once you drop below it. Set equal to hide-below-y
+  #                                  to disable the upper band entirely.
   hide-below-y: 0
+  barrier-upper-y: 10
+  upper-reveal-radius: 4
   world-min-y: -64
+
+  # Creative/Spectator reveal a solid radius around themselves (instead of relying on
+  # air-connected cave flood-fill) so chunks always load while flying through solid blocks.
+  creative-spectator-radius-reveal: true
 
   reveal-initial-radius: 3
   reveal-movement-radius: 2
   reveal-edge-extra-radius: 1
   sticky-radius: 10
   max-revealed-chunks-per-player: 4096
+
+  # Tile-entity (chest/shulker/hopper/spawner/...) masking. Containers below the barrier are
+  # shown as AIR until the viewer is within tile-entity-render-distance blocks. While the viewer
+  # is below the lower barrier, tile entities up to tile-entity-mask-above-range blocks ABOVE
+  # hide-below-y are also masked.
+  tile-entity-mask-enabled: true
+  tile-entity-render-distance: 10
+  tile-entity-mask-above-range: 100
 
   recompute-period-ticks: 10
   recompute-min-ticks: 2
@@ -36,11 +61,20 @@ hider:
   salt-rotate-period-ticks: 12000
   salt-rotate-stagger-ticks: 5
 
+  # Void fall protection (Y <= -65)
+  void-redirect-server: ""          # BungeeCord server to redirect to; empty = teleport
+  void-spawn-world: "world"
+  void-spawn-x: 0
+  void-spawn-y: 100
+  void-spawn-z: 0
+  void-spawn-yaw: 0
+  void-spawn-pitch: 0
+
   # Misc things
   verbose-logging: false
   bypass-permission: "donutrecreation.hider.bypass"
 
-# /offand / /punish
+# /offend / /punish
 punishments:
   Krypton:
     BanTime: lifetime

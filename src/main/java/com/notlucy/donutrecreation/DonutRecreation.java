@@ -5,15 +5,22 @@ import com.notlucy.donutrecreation.baseprotection.RevealListener;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.SpawnListener;
 import com.notlucy.donutrecreation.baseprotection.packet.PacketHider;
+import com.notlucy.donutrecreation.commands.DonutCommand;
 import com.notlucy.donutrecreation.punish.commands.PunishCommand;
+import com.notlucy.donutrecreation.punish.commands.UnbanCommand;
 import com.notlucy.donutrecreation.punish.listeners.AltBanListener;
 import com.notlucy.donutrecreation.punish.store.PlayerDataStore;
+import com.notlucy.donutrecreation.settings.SettingsCommand;
+import com.notlucy.donutrecreation.settings.SettingsGuiListener;
 import com.notlucy.donutrecreation.spawn.commands.SpawnCommand;
+import com.notlucy.donutrecreation.spawn.manager.FakeEntityManager;
 import com.notlucy.donutrecreation.spawn.manager.FakePlayerManager;
 import com.notlucy.donutrecreation.spawn.manager.GhostBlockManager;
+import com.notlucy.donutrecreation.spawn.manager.StashManager;
 import com.notlucy.donutrecreation.sus.commands.SusCommand;
 import com.notlucy.donutrecreation.sus.listeners.BehaviorTracker;
 import com.notlucy.donutrecreation.sus.model.SusFlagManager;
+import com.notlucy.donutrecreation.util.LogData;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import io.papermc.lib.PaperLib;
@@ -33,6 +40,7 @@ public class DonutRecreation extends JavaPlugin {
   private PlayerDataStore playerDataStore;
   private GhostBlockManager ghostBlockManager;
   private FakePlayerManager fakePlayerManager;
+  private FakeEntityManager fakeEntityManager;
 
   @Override
   public void onLoad() {
@@ -48,6 +56,7 @@ public class DonutRecreation extends JavaPlugin {
     PaperLib.suggestPaper(this);
 
     saveDefaultConfig();
+    LogData.init(this);
     PacketEvents.getAPI().init();
     preloadPacketEventsMappings();
 
@@ -55,21 +64,38 @@ public class DonutRecreation extends JavaPlugin {
     getServer().getPluginManager().registerEvents(susCommand, this);
     Objects.requireNonNull(getCommand("sus")).setExecutor(susCommand);
 
-    this.playerDataStore = new PlayerDataStore(getDataFolder(), getLogger());
+    this.playerDataStore = new PlayerDataStore(getDataFolder());
     this.playerDataStore.startAsyncSaver(this);
     getServer().getPluginManager().registerEvents(
         new AltBanListener(this, playerDataStore), this);
     registerBrandFingerprint(playerDataStore);
+    getServer().getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
 
     PunishCommand punishCommand = new PunishCommand(this, playerDataStore);
-    var offandReg = getCommand("offand");
-    if (offandReg != null) {
-      offandReg.setExecutor(punishCommand);
-      offandReg.setTabCompleter(punishCommand);
+    var offendReg = getCommand("offend");
+    if (offendReg != null) {
+      offendReg.setExecutor(punishCommand);
+      offendReg.setTabCompleter(punishCommand);
+    }
+
+    UnbanCommand unbanCommand = new UnbanCommand(this, playerDataStore);
+    var unbanReg = getCommand("unoffend");
+    if (unbanReg != null) {
+      unbanReg.setExecutor(unbanCommand);
+      unbanReg.setTabCompleter(unbanCommand);
+    }
+
+    DonutCommand donutCommand = new DonutCommand(this, playerDataStore);
+    var donutReg = getCommand("donut");
+    if (donutReg != null) {
+      donutReg.setExecutor(donutCommand);
+      donutReg.setTabCompleter(donutCommand);
     }
 
     this.ghostBlockManager = new GhostBlockManager(this);
     this.fakePlayerManager = new FakePlayerManager(this);
+    this.fakeEntityManager = new FakeEntityManager(this);
+    StashManager stashManager = new StashManager(getDataFolder());
     getServer().getPluginManager().registerEvents(new Listener() {
       @EventHandler
       public void onJoin(PlayerJoinEvent e) {
@@ -93,12 +119,20 @@ public class DonutRecreation extends JavaPlugin {
         }
       }
     }, this);
-    SpawnCommand spawnCommand = new SpawnCommand(this, ghostBlockManager, fakePlayerManager);
+    SpawnCommand spawnCommand = new SpawnCommand(
+        this, ghostBlockManager, fakePlayerManager, fakeEntityManager, stashManager);
     var spawnReg = getCommand("spawn");
     if (spawnReg != null) {
       spawnReg.setExecutor(spawnCommand);
       spawnReg.setTabCompleter(spawnCommand);
     }
+
+    SettingsCommand settingsCommand = new SettingsCommand(this);
+    var settingsReg = getCommand("settings");
+    if (settingsReg != null) {
+      settingsReg.setExecutor(settingsCommand);
+    }
+    getServer().getPluginManager().registerEvents(new SettingsGuiListener(), this);
 
     BehaviorTracker behaviorTracker = new BehaviorTracker(this);
     getServer().getPluginManager().registerEvents(behaviorTracker, this);

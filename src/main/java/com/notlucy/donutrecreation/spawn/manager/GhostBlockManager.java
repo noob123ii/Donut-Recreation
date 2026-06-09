@@ -2,7 +2,9 @@ package com.notlucy.donutrecreation.spawn.manager;
 
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -73,10 +75,19 @@ public final class GhostBlockManager {
       return -1L;
     }
     List<Location> sentLocations = new ArrayList<>(ghosts.size());
+    Map<Long, Map<Location, BlockData>> batches = new HashMap<>();
     for (GhostBlock ghost : ghosts) {
       try {
-        viewer.sendBlockChange(ghost.location, ghost.data);
+        Location loc = ghost.location;
+        long key = chunkKey(loc.getBlockX() >> 4, loc.getBlockZ() >> 4);
+        batches.computeIfAbsent(key, ignored -> new HashMap<>()).put(loc, ghost.data);
         sentLocations.add(ghost.location);
+      } catch (Throwable ignored) {
+      }
+    }
+    for (Map<Location, BlockData> batch : batches.values()) {
+      try {
+        viewer.sendMultiBlockChange(batch);
       } catch (Throwable ignored) {
       }
     }
@@ -97,9 +108,16 @@ public final class GhostBlockManager {
     }
     Player viewer = Bukkit.getPlayer(group.viewerId);
     if (viewer != null && viewer.isOnline()) {
+      Map<Location, BlockData> batch = new HashMap<>();
       for (Location loc : group.locations) {
         try {
-          viewer.sendBlockChange(loc, loc.getBlock().getBlockData());
+          batch.put(loc, loc.getBlock().getBlockData());
+        } catch (Throwable ignored) {
+        }
+      }
+      if (!batch.isEmpty()) {
+        try {
+          viewer.sendMultiBlockChange(batch);
         } catch (Throwable ignored) {
         }
       }
@@ -159,5 +177,9 @@ public final class GhostBlockManager {
       }
     }
     return false;
+  }
+
+  private static long chunkKey(int x, int z) {
+    return ((long) x << 32) ^ (z & 0xffffffffL);
   }
 }

@@ -1,5 +1,6 @@
 package com.notlucy.donutrecreation.baseprotection;
 
+import com.notlucy.donutrecreation.util.LogData;
 import java.util.EnumSet;
 import java.util.Set;
 import org.bukkit.Material;
@@ -46,7 +47,7 @@ public class SpawnListener implements Listener {
         .getBoolean("hider.block-natural-spawns-below-hide", true);
     this.killAllUnderFloorSpawns = rm.plugin().getConfig()
         .getBoolean("hider.block-all-spawns-below-hide", true);
-    rm.plugin().getLogger().info("[hider] block natural spawns under floor: " + killNaturalSpawns
+    LogData.get().info("[hider] block natural spawns under floor: " + killNaturalSpawns
         + " (all reasons: " + killAllUnderFloorSpawns + ")");
   }
 
@@ -66,7 +67,7 @@ public class SpawnListener implements Listener {
     event.setCancelled(true);
     if (rm.verboseLogging()) {
       var loc = entity.getLocation();
-      rm.plugin().getLogger().info("[hider] cancelled " + entity.getType()
+      LogData.get().info("[hider] cancelled " + entity.getType()
           + " @ " + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ()
           + " (" + reason + ")");
     }
