@@ -1,67 +1,38 @@
 logging:
   enabled: true
-  fine: true   # enabled for detailed debugging
+  fine: true
 
 hider:
   enabled: true
-
-  # --- World ---
-  # Reduced radius (2 chunks) for lower TPS impact on slow servers.
-  # Underground reveals persist when player surfaces to avoid hide-packet spikes.
   hide-below-y: 0
   barrier-upper-y: 10
   upper-reveal-radius: 2
-
   world-min-y: -64
   creative-spectator-radius-reveal: false
-
   reveal-initial-radius: 2
   reveal-movement-radius: 1
   reveal-edge-extra-radius: 0
-
-  # Lower = less memory / chunk tracking overhead
   sticky-radius: 2
   max-revealed-chunks-per-player: 512
   max-reveal-hide-per-recompute: 32
-
-  # --- Tile Entities ---
   tile-entity-mask-enabled: true
   tile-entity-render-distance: 16
   tile-entity-mask-above-range: 32
-
-  # --- Recompute ---
-  # Slower recalcs = less spam and better TPS stability
   recompute-period-ticks: 30
   recompute-min-ticks: 10
-
-  # --- Flood Fill (main cost) ---
-  # Reduced for small server - still functional but less CPU intensive
   flood-fill-budget: 5000
   flood-fill-block-radius: 32
   flood-fill-throttle-ticks: 40
-
-  # --- Entities ---
   entity-scan-chunk-radius: 4
-
-  # --- Geodes ---
   geode-hide-enabled: true
   geode-reveal-radius: 3
   max-geode-chunks: 1024
-
-  # --- Spawns ---
   block-natural-spawns-below-hide: true
   block-all-spawns-below-hide: false
-
-  # --- Anti-xray ---
-  # Seed-based ore hiding - no disk cache needed
   decoy-amethyst-enabled: true
   decoy-amethyst-rate-bits: 13
-
-  # Less CPU churn
   salt-rotate-period-ticks: 24000
   salt-rotate-stagger-ticks: 20
-
-  # --- Void Protection ---
   void-redirect-server: ""
   void-spawn-world: "world"
   void-spawn-x: 0
@@ -69,8 +40,6 @@ hider:
   void-spawn-z: 0
   void-spawn-yaw: 0
   void-spawn-pitch: 0
-
-  # --- Misc ---
   verbose-logging: false
 
 punishments:

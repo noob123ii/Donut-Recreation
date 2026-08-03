@@ -2,8 +2,8 @@
 
 PaperMC plugin that recreates Donut SMP's anti-cheat toolkit on your own server.
 
-Anti-freecam / anti-xray base hider with two-tier masking, geode hiding, a `/sus` review GUI,
-punishment system with alt-evasion detection, and `/spawn` decoys. Client-side trickery done
+Anti-freecam / anti-xray base hider with two-tier masking, geode hiding, a `/acsus` review GUI,
+punishment system with alt-evasion detection, and `/spawnfake` decoys. Client-side trickery done
 via [PacketEvents](https://github.com/retrooper/packetevents) — the real world on disk is
 never touched.
 
@@ -13,28 +13,33 @@ Tested on **Paper 1.21.4**. Requires **Java 21**.
 
 ## Commands
 
-### `/sus [player] [reason]`
+### `/acsus [player] [reason]`
 Chest GUI listing flagged players. Click a head to spectate that player. The behaviour
 tracker flags sustained elytra flights, mining bursts, and macro-like repetition in the
 background.
 
 ### `/offend <player> <reason>` (alias `/punish`)
-Bans and optionally wipes player data. Reasons are defined in `config.yml` under `punishments:`.
+Bans and optionally wipes player data. Reasons defined in `config.yml` under `punishments:`.
 Bans stored in `playerdata.db` for alt-detection. OP-only.
 
-### `/unoffend <player>`
+### `/unban <player>`
 Unbans a player and clears their evader flag. OP-only.
 
-### `/spawn <decoy>`
-- `fakestash` — 6x6x4 hollow stone room with chests, visible only to you, reverts in 5 min
-- `fakespawner` — ghost spawner where you're looking
-- `fakeplayer` — 10-second NPC standing in front of you
-- `fakebedrockspawner` — spawner setup at y=63 with a fake player
+### `/spawnfake <stash|spawner|player|bedrockspawner>`
+Spawns ephemeral ghost-blocks and NPCs. Requires staffmode.
+- `stash` — 6x6x4 hollow stone room with chests, visible only to you, reverts in 5 min
+- `spawner` — ghost spawner where you're looking
+- `player` — 10-second NPC standing in front of you
+- `bedrockspawner` — spawner setup at y=63 with a fake player
 
-All blocks are ghost blocks. OP-only.
+### `/staffmode`
+Toggles staff mode. Blocks non-whitelisted commands while active. Required for `/spawnfake`.
 
 ### `/donut reload`
 Reloads config without restart. OP-only.
+
+### `/donut chunk generate <border>`
+Generates a chunk border. OP-only.
 
 ---
 
