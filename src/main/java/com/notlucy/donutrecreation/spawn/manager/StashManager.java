@@ -226,6 +226,9 @@ public final class StashManager {
           }
           data = mat.createBlockData();
         }
+        if (data.getMaterial() == Material.AIR || data.getMaterial() == Material.CAVE_AIR) {
+          continue;
+        }
         blocks.add(new StashBlock(x, y, z, data));
       }
     }
@@ -307,16 +310,102 @@ public final class StashManager {
     }
 
     public List<GhostBlockManager.GhostBlock> toGhostBlocks(Location origin) {
+      return toGhostBlocks(origin, 0f);
+    }
+
+    public List<GhostBlockManager.GhostBlock> toGhostBlocks(Location origin, float yaw) {
       World world = origin.getWorld();
       int ox = origin.getBlockX();
       int oy = origin.getBlockY();
       int oz = origin.getBlockZ();
+      int steps = yawToSteps(yaw);
       List<GhostBlockManager.GhostBlock> list = new ArrayList<>(blocks.size());
       for (StashBlock b : blocks) {
+        BlockData rotated = rotateBlockData(b.data, steps);
         list.add(new GhostBlockManager.GhostBlock(
-            new Location(world, ox + b.x, oy + b.y, oz + b.z), b.data));
+            new Location(world, ox + b.x, oy + b.y, oz + b.z), rotated));
       }
       return list;
+    }
+
+    private static int yawToSteps(float yaw) {
+      float norm = yaw % 360f;
+      if (norm < 0f) {
+        norm += 360f;
+      }
+      return Math.round(norm / 90f) % 4;
+    }
+
+    private static BlockData rotateBlockData(BlockData data, int steps) {
+      if (steps == 0) {
+        return data;
+      }
+      if (data instanceof org.bukkit.block.data.Directional dir) {
+        org.bukkit.block.BlockFace facing = dir.getFacing();
+        org.bukkit.block.BlockFace[] horiz = {
+            org.bukkit.block.BlockFace.SOUTH,
+            org.bukkit.block.BlockFace.WEST,
+            org.bukkit.block.BlockFace.NORTH,
+            org.bukkit.block.BlockFace.EAST
+        };
+        int idx = -1;
+        for (int i = 0; i < horiz.length; i++) {
+          if (horiz[i] == facing) {
+            idx = i;
+            break;
+          }
+        }
+        if (idx >= 0) {
+          boolean allHoriz = true;
+          for (org.bukkit.block.BlockFace f : horiz) {
+            if (!dir.getFaces().contains(f)) {
+              allHoriz = false;
+              break;
+            }
+          }
+          if (allHoriz) {
+            BlockData copy = data.clone();
+            ((org.bukkit.block.data.Directional) copy).setFacing(
+                horiz[(idx + steps) % 4]);
+            return copy;
+          }
+        }
+      }
+      if (data instanceof org.bukkit.block.data.Rotatable rot) {
+        org.bukkit.block.BlockFace cur = rot.getRotation();
+        org.bukkit.block.BlockFace[] all16 = {
+            org.bukkit.block.BlockFace.SOUTH,
+            org.bukkit.block.BlockFace.SOUTH_SOUTH_WEST,
+            org.bukkit.block.BlockFace.SOUTH_WEST,
+            org.bukkit.block.BlockFace.WEST_SOUTH_WEST,
+            org.bukkit.block.BlockFace.WEST,
+            org.bukkit.block.BlockFace.WEST_NORTH_WEST,
+            org.bukkit.block.BlockFace.NORTH_WEST,
+            org.bukkit.block.BlockFace.NORTH_NORTH_WEST,
+            org.bukkit.block.BlockFace.NORTH,
+            org.bukkit.block.BlockFace.NORTH_NORTH_EAST,
+            org.bukkit.block.BlockFace.NORTH_EAST,
+            org.bukkit.block.BlockFace.EAST_NORTH_EAST,
+            org.bukkit.block.BlockFace.EAST,
+            org.bukkit.block.BlockFace.EAST_SOUTH_EAST,
+            org.bukkit.block.BlockFace.SOUTH_EAST,
+            org.bukkit.block.BlockFace.SOUTH_SOUTH_EAST
+        };
+        int rIdx = -1;
+        for (int i = 0; i < all16.length; i++) {
+          if (all16[i] == cur) {
+            rIdx = i;
+            break;
+          }
+        }
+        if (rIdx >= 0) {
+          BlockData copy = data.clone();
+          ((org.bukkit.block.data.Rotatable) copy).setRotation(
+              all16[(rIdx + steps * 4) % 16]);
+          return copy;
+        }
+      }
+      return data;
     }
   }
 

@@ -52,6 +52,8 @@ public class RevealManager {
 
   private final ConcurrentMap<UUID, Long> surfacedSinceTick = new ConcurrentHashMap<>();
 
+  private com.notlucy.donutrecreation.spawn.manager.GhostBlockManager ghostBlockManager;
+
   private final ConcurrentMap<UUID, Long>     lastFloodTick       = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Set<Long>> cachedFlood        = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, long[]>   lastRecomputeStamp  = new ConcurrentHashMap<>();
@@ -134,6 +136,10 @@ public class RevealManager {
   public boolean geodeHideEnabled() { return geodeOn; }
   public boolean verboseLogging()   { return verbose; }
   public DonutRecreation plugin()   { return plugin; }
+
+  public boolean hasGhostBlockAt(java.util.UUID playerId, int x, int y, int z) {
+    return ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, x, y, z);
+  }
 
   public static long chunkKey(int chunkX, int chunkZ) {
     return (((long) chunkX) << 32) | (chunkZ & 0xFFFFFFFFL);
@@ -244,6 +250,11 @@ public class RevealManager {
     if (set.add(key)) {
       sendRealAmethyst(player, key);
     }
+  }
+
+  public void setGhostBlockManager(
+      com.notlucy.donutrecreation.spawn.manager.GhostBlockManager gbm) {
+    this.ghostBlockManager = gbm;
   }
 
   public void recomputeForPlayer(Player player) {
@@ -601,6 +612,7 @@ public class RevealManager {
     UUID worldUid = world.getUID();
     long chunkKey = chunkKey(chunkX, chunkZ);
     Location playerLoc = player.getLocation();
+    UUID playerId = player.getUniqueId();
 
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
@@ -610,6 +622,9 @@ public class RevealManager {
       for (int z = 0; z < 16; z++) {
         int wz = baseZ + z;
         for (int y = minY; y < maxY; y++) {
+          if (ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, wx, y, wz)) {
+            continue;
+          }
           BlockData real = chunk.getBlock(x, y, z).getBlockData();
           Material type = real.getMaterial();
 
@@ -638,6 +653,7 @@ public class RevealManager {
     BlockData[] palette   = fakeFloorPalette;
     int paletteLen = palette.length;
     int salt = saltFor(player.getUniqueId());
+    UUID playerId = player.getUniqueId();
 
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
@@ -647,6 +663,9 @@ public class RevealManager {
       for (int z = 0; z < 16; z++) {
         int wz = baseZ + z;
         for (int y = minY; y < maxY; y++) {
+          if (ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, wx, y, wz)) {
+            continue;
+          }
           int idx = Math.floorMod(scrambleHash(wx ^ salt, y, wz ^ salt), paletteLen);
           batch.put(new Location(world, wx, y, wz), palette[idx]);
           if (++n >= batchSize) { player.sendMultiBlockChange(batch); batch.clear(); n = 0; }
@@ -897,6 +916,9 @@ public class RevealManager {
         if (alreadyRevealed) sendUnderworldBlocks(player, fcx, fcz);
         if (alreadyUpper)    sendUpperBand(player, fcx, fcz, false);
         recomputeGeodeForPlayer(player);
+        if (ghostBlockManager != null) {
+          ghostBlockManager.resendForChunk(id, player, fcx, fcz);
+        }
       }, 1L);
     }
   }
@@ -1007,10 +1029,7 @@ public class RevealManager {
   }
 
   public void onChunkUnload(int chunkX, int chunkZ) {
-
     long ck = chunkKey(chunkX, chunkZ);
-    scannedGeodes.remove(ck);
-    geodeByChunk.remove(ck);
     for (Set<Long> set : revealedGeodes.values())  set.remove(ck);
     for (Set<Long> set : deliveredChunks.values()) set.remove(ck);
   }
@@ -1049,5 +1068,79 @@ public class RevealManager {
 
   public void clearDeliveredChunks(UUID playerId) {
     deliveredChunks.remove(playerId);
+  }
+
+  public void saveGeodeData() {
+    try {
+      java.io.File folder = new java.io.File(plugin.getDataFolder(), "geode-cache");
+      folder.mkdirs();
+      java.io.File scanFile = new java.io.File(folder, "scanned.dat");
+      java.io.File geodeFile = new java.io.File(folder, "geodes.dat");
+
+      java.util.List<String> scannedLines = new java.util.ArrayList<>();
+      for (long ck : scannedGeodes) {
+        scannedLines.add(Long.toHexString(ck));
+      }
+      java.nio.file.Files.write(scanFile.toPath(), scannedLines);
+
+      java.util.List<String> geodeLines = new java.util.ArrayList<>();
+      for (var entry : geodeByChunk.entrySet()) {
+        long ck = entry.getKey();
+        Set<Long> positions = entry.getValue();
+        if (positions == null || positions.isEmpty()) continue;
+        StringBuilder sb = new StringBuilder();
+        sb.append(Long.toHexString(ck));
+        for (long pos : positions) {
+          sb.append(':').append(Long.toHexString(pos));
+        }
+        geodeLines.add(sb.toString());
+      }
+      java.nio.file.Files.write(geodeFile.toPath(), geodeLines);
+      LogData.get().info("[geode-cache] saved " + scannedGeodes.size()
+          + " scanned chunks, " + geodeByChunk.size() + " with positions");
+    } catch (Throwable e) {
+      LogData.get().warning("[geode-cache] save failed: " + e);
+    }
+  }
+
+  public void loadGeodeData() {
+    try {
+      java.io.File folder = new java.io.File(plugin.getDataFolder(), "geode-cache");
+      java.io.File scanFile = new java.io.File(folder, "scanned.dat");
+      java.io.File geodeFile = new java.io.File(folder, "geodes.dat");
+
+      if (scanFile.exists()) {
+        java.util.List<String> lines = java.nio.file.Files.readAllLines(scanFile.toPath());
+        for (String line : lines) {
+          line = line.trim();
+          if (!line.isEmpty()) {
+            scannedGeodes.add(Long.parseUnsignedLong(line, 16));
+          }
+        }
+      }
+
+      if (geodeFile.exists()) {
+        java.util.List<String> lines = java.nio.file.Files.readAllLines(geodeFile.toPath());
+        for (String line : lines) {
+          line = line.trim();
+          if (line.isEmpty()) continue;
+          String[] parts = line.split(":");
+          if (parts.length < 2) continue;
+          long ck = Long.parseUnsignedLong(parts[0], 16);
+          Set<Long> positions = ConcurrentHashMap.newKeySet();
+          for (int i = 1; i < parts.length; i++) {
+            positions.add(Long.parseUnsignedLong(parts[i], 16));
+          }
+          geodeByChunk.put(ck, positions);
+          scannedGeodes.add(ck);
+          geodeInsertionOrder.add(ck);
+        }
+      }
+
+      LogData.get().info("[geode-cache] loaded " + scannedGeodes.size()
+          + " scanned chunks, " + geodeByChunk.size() + " with positions");
+    } catch (Throwable e) {
+      LogData.get().warning("[geode-cache] load failed: " + e);
+    }
   }
 }

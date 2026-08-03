@@ -49,14 +49,13 @@ public final class AltBanListener implements Listener {
 
     PlayerDataStore.BanRecord ban = store.activeBanFor(event.getUniqueId());
     if (ban != null) {
-      String expires = ban.expiresAt < 0
-          ? "&cNever"
-          : "&f" + Instant.ofEpochMilli(ban.expiresAt);
       String msg = plugin.color(
           "&c&lYOU ARE BANNED\n\n"
               + "&7Reason: &f" + ban.reason + "\n"
               + "&7Duration: &f" + ban.banTime + "\n"
-              + "&7Expires: " + expires + "\n\n"
+              + "&7Time remaining: &f" + ban.timeRemaining() + "\n"
+              + "&7Banned: &f" + ban.timeSince() + "\n"
+              + "&7Ban ID: &f" + ban.banId + "\n\n"
               + "&7Appeal at &9discord.gg/example");
       event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, msg);
       return;
@@ -64,6 +63,14 @@ public final class AltBanListener implements Listener {
 
     PlayerDataStore.BanRecord other = store.activeBanSharingIp(ip, event.getUniqueId());
     if (other == null) {
+      return;
+    }
+
+    int altCount = store.countBannedSharingIp(ip, event.getUniqueId());
+    int threshold = plugin.getConfig().getInt("alt-ban-threshold", 5);
+
+    if (altCount < threshold) {
+      flag(event.getUniqueId(), event.getName(), other, altCount, threshold);
       return;
     }
 
@@ -79,17 +86,20 @@ public final class AltBanListener implements Listener {
     };
 
     if (!shouldBan) {
-      flag(event.getUniqueId(), event.getName(), other);
+      flag(event.getUniqueId(), event.getName(), other, altCount, threshold);
       return;
     }
 
     long expiresAt = System.currentTimeMillis() + MONTH_MS;
+    String banId = store.generateBanId();
     PlayerDataStore.BanRecord evader = new PlayerDataStore.BanRecord(
+        banId,
         event.getUniqueId(),
         event.getName(),
         ip,
         EVADE_REASON,
         "1mo",
+        System.currentTimeMillis(),
         expiresAt,
         true);
     store.recordBan(evader);
@@ -105,8 +115,10 @@ public final class AltBanListener implements Listener {
     String msg = plugin.color(
         "&c&lBAN EVASION DETECTED\n\n"
             + "&7Reason: &f" + EVADE_REASON + "\n"
-            + "&7Duration: &f1 month\n"
-            + "&7Linked to: &f" + (other.name == null ? other.uuid.toString() : other.name));
+            + "&7Duration: &f" + evader.timeRemaining() + "\n"
+            + "&7Linked to: &f" + (other.name == null ? other.uuid.toString() : other.name)
+            + "\n&7Alts on IP: &f" + altCount
+            + "\n&7Ban ID: &f" + banId);
     event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, msg);
   }
 
@@ -128,16 +140,16 @@ public final class AltBanListener implements Listener {
     return !known;
   }
 
-  private void flag(UUID uuid, String name, PlayerDataStore.BanRecord other) {
+  private void flag(UUID uuid, String name, PlayerDataStore.BanRecord other, int altCount, int threshold) {
     try {
       String linked = other.name == null ? other.uuid.toString() : other.name;
       plugin.susFlagManager().flag(uuid, name,
-          "Shares IP with banned " + linked + " (" + other.reason + ")");
+          "Shares IP with banned " + linked + " (" + other.reason + ") — alt " + altCount + "/" + threshold);
       Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getOnlinePlayers().stream()
           .filter(p -> p.hasPermission("donutrecreation.*"))
           .forEach(op -> op.sendMessage(plugin.color(
               "&e[&6ALT&e] &f" + name + " &7shares IP with banned &f" + linked
-                  + " &7(&f" + other.reason + "&7) — flagged, not auto-banned."))));
+                  + " &7(&f" + other.reason + "&7) &ealt " + altCount + "/" + threshold + " — flagged"))));
     } catch (Throwable ignored) {
     }
   }

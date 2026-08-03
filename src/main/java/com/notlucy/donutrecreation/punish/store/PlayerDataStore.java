@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -28,27 +29,76 @@ public final class PlayerDataStore {
   private static final long SAVE_PERIOD_TICKS = 200L;
 
   public static final class BanRecord {
+    public final String banId;
     public final UUID uuid;
     public final String name;
     public final String ip;
     public final String reason;
     public final String banTime;
+    public final long bannedAt;
     public final long expiresAt;
     public final boolean evader;
 
-    public BanRecord(UUID uuid, String name, String ip, String reason,
-                     String banTime, long expiresAt, boolean evader) {
+    public BanRecord(String banId, UUID uuid, String name, String ip, String reason,
+                     String banTime, long bannedAt, long expiresAt, boolean evader) {
+      this.banId = banId;
       this.uuid = uuid;
       this.name = name;
       this.ip = ip;
       this.reason = reason;
       this.banTime = banTime;
+      this.bannedAt = bannedAt;
       this.expiresAt = expiresAt;
       this.evader = evader;
     }
 
     public boolean isActive(long now) {
       return expiresAt < 0 || expiresAt > now;
+    }
+
+    public String timeRemaining() {
+      if (expiresAt < 0) {
+        return "Permanent";
+      }
+      long remaining = expiresAt - System.currentTimeMillis();
+      if (remaining <= 0) {
+        return "Expired";
+      }
+      long seconds = remaining / 1000L;
+      long minutes = seconds / 60L;
+      long hours = minutes / 60L;
+      long days = hours / 24L;
+      if (days > 0) {
+        return days + "d " + (hours % 24) + "h " + (minutes % 60) + "m";
+      }
+      if (hours > 0) {
+        return hours + "h " + (minutes % 60) + "m " + (seconds % 60) + "s";
+      }
+      if (minutes > 0) {
+        return minutes + "m " + (seconds % 60) + "s";
+      }
+      return seconds + "s";
+    }
+
+    public String timeSince() {
+      long elapsed = System.currentTimeMillis() - bannedAt;
+      if (elapsed < 0) {
+        return "just now";
+      }
+      long seconds = elapsed / 1000L;
+      long minutes = seconds / 60L;
+      long hours = minutes / 60L;
+      long days = hours / 24L;
+      if (days > 0) {
+        return days + "d " + (hours % 24) + "h ago";
+      }
+      if (hours > 0) {
+        return hours + "h " + (minutes % 60) + "m ago";
+      }
+      if (minutes > 0) {
+        return minutes + "m " + (seconds % 60) + "s ago";
+      }
+      return seconds + "s ago";
     }
   }
 
@@ -67,11 +117,13 @@ public final class PlayerDataStore {
 
   private final File file;
   private final ConcurrentMap<UUID, BanRecord> bans = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, BanRecord> banIndex = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Deque<UUID>> ips = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
   private final Object lock = new Object();
   private volatile boolean dirty = false;
   private volatile int task = -1;
+  private final AtomicLong banCounter = new AtomicLong(System.currentTimeMillis());
 
   public PlayerDataStore(File dataFolder) {
     this.file = new File(dataFolder, "playerdata.db");
@@ -160,8 +212,26 @@ public final class PlayerDataStore {
     if (id == null) {
       return;
     }
-    bans.remove(id);
+    BanRecord removed = bans.remove(id);
+    if (removed != null && removed.banId != null) {
+      banIndex.remove(removed.banId);
+    }
     dirty = true;
+  }
+
+  public String generateBanId() {
+    return "BAN-" + banCounter.incrementAndGet();
+  }
+
+  public BanRecord lookupBanById(String banId) {
+    if (banId == null) {
+      return null;
+    }
+    return banIndex.get(banId);
+  }
+
+  public BanRecord lastBanFor(UUID id) {
+    return bans.get(id);
   }
 
   public void recordBan(BanRecord ban) {
@@ -169,6 +239,9 @@ public final class PlayerDataStore {
       return;
     }
     bans.put(ban.uuid, ban);
+    if (ban.banId != null) {
+      banIndex.put(ban.banId, ban);
+    }
     if (ban.ip != null && !ban.ip.isEmpty()) {
       Deque<UUID> bucket = ips.computeIfAbsent(ban.ip, k -> new ArrayDeque<>());
       synchronized (bucket) {
@@ -230,6 +303,32 @@ public final class PlayerDataStore {
     return null;
   }
 
+  public int countBannedSharingIp(String ip, UUID excluding) {
+    if (ip == null || ip.isEmpty()) {
+      return 0;
+    }
+    Deque<UUID> bucket = ips.get(ip);
+    if (bucket == null) {
+      return 0;
+    }
+    List<UUID> snapshot;
+    synchronized (bucket) {
+      snapshot = new ArrayList<>(bucket);
+    }
+    long now = System.currentTimeMillis();
+    int count = 0;
+    for (UUID id : snapshot) {
+      if (id.equals(excluding)) {
+        continue;
+      }
+      BanRecord ban = bans.get(id);
+      if (ban != null && ban.isActive(now)) {
+        count++;
+      }
+    }
+    return count;
+  }
+
   public Profile profileOf(UUID id) {
     return profiles.get(id);
   }
@@ -282,15 +381,23 @@ public final class PlayerDataStore {
         }
         try {
           UUID id = UUID.fromString(key);
+          String banId = entry.getString("banId", null);
+          if (banId == null) {
+            banId = "BAN-" + banCounter.incrementAndGet();
+          }
+          long bannedAt = entry.getLong("bannedAt", System.currentTimeMillis());
           BanRecord ban = new BanRecord(
+              banId,
               id,
               entry.getString("name"),
               entry.getString("ip"),
               entry.getString("reason", ""),
               entry.getString("bantime", ""),
+              bannedAt,
               entry.getLong("expiresAt", -1L),
               entry.getBoolean("evader", false));
           bans.put(id, ban);
+          banIndex.put(banId, ban);
         } catch (IllegalArgumentException ignored) {
         }
       }
@@ -340,10 +447,12 @@ public final class PlayerDataStore {
       Map<String, Object> bansOut = new LinkedHashMap<>();
       for (BanRecord ban : bans.values()) {
         Map<String, Object> entry = new LinkedHashMap<>();
+        entry.put("banId", ban.banId);
         entry.put("name", ban.name);
         entry.put("ip", ban.ip);
         entry.put("reason", ban.reason);
         entry.put("bantime", ban.banTime);
+        entry.put("bannedAt", ban.bannedAt);
         entry.put("expiresAt", ban.expiresAt);
         entry.put("evader", ban.evader);
         bansOut.put(ban.uuid.toString(), entry);

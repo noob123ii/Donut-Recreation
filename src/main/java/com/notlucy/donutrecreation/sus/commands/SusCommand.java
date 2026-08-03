@@ -37,22 +37,16 @@ public class SusCommand implements CommandExecutor, Listener {
   private static final int GUI_SIZE = 54;
   private static final int HEADS_PER_PAGE = 45;
   private static final int PREV_SLOT = 45;
-  private static final int BACK_SLOT = 48;
   private static final int REFRESH_SLOT = 49;
   private static final int NEXT_SLOT = 53;
   private static final String CATEGORY_CUSTOM = "custom";
-  private static final List<String> ANTI_CHEAT_PLUGINS = List.of(
-      "Matrix", "Vulcan", "GrimAC", "Spartan", "AntiAura", "Negativity", "Themis", "Kauri", "Warden");
 
   private final DonutRecreation plugin;
-  private final NamespacedKey catKey;
   private final NamespacedKey targetKey;
   private final NamespacedKey refreshKey;
-  private final NamespacedKey backKey;
   private final NamespacedKey prevKey;
   private final NamespacedKey nextKey;
 
-  private final ConcurrentMap<UUID, String> viewCat = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Integer> viewPage = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Long> lastUse = new ConcurrentHashMap<>();
 
@@ -61,10 +55,8 @@ public class SusCommand implements CommandExecutor, Listener {
       justification = "Plugin instance is shared by Bukkit.")
   public SusCommand(DonutRecreation plugin) {
     this.plugin = plugin;
-    this.catKey = new NamespacedKey(plugin, "ac_category");
     this.targetKey = new NamespacedKey(plugin, "ac_target");
     this.refreshKey = new NamespacedKey(plugin, "ac_refresh");
-    this.backKey = new NamespacedKey(plugin, "ac_back");
     this.prevKey = new NamespacedKey(plugin, "ac_prev");
     this.nextKey = new NamespacedKey(plugin, "ac_next");
   }
@@ -80,7 +72,7 @@ public class SusCommand implements CommandExecutor, Listener {
       return true;
     }
     if (args.length == 0) {
-      openCategories(reporter);
+      openPlayerList(reporter, 0);
       return true;
     }
 
@@ -117,109 +109,20 @@ public class SusCommand implements CommandExecutor, Listener {
     return true;
   }
 
-  private List<String> categories() {
-    List<String> cats = new ArrayList<>();
-    cats.add(CATEGORY_CUSTOM);
-    for (String name : ANTI_CHEAT_PLUGINS) {
-      if (Bukkit.getPluginManager().getPlugin(name) != null) {
-        cats.add(name.toLowerCase(Locale.ROOT));
-      }
-    }
-    return cats;
-  }
-
-  private String catName(String cat) {
-    return switch (cat) {
-      case CATEGORY_CUSTOM -> "Custom";
-      case "matrix" -> "Matrix";
-      case "vulcan" -> "Vulcan";
-      case "grimac" -> "GrimAC";
-      case "spartan" -> "Spartan";
-      case "antiaura" -> "AntiAura";
-      case "negativity" -> "Negativity";
-      case "themis" -> "Themis";
-      case "kauri" -> "Kauri";
-      case "warden" -> "Warden";
-      default -> cat.substring(0, 1).toUpperCase(Locale.ROOT) + cat.substring(1);
-    };
-  }
-
-  private Material catIcon(String cat) {
-    return switch (cat) {
-      case CATEGORY_CUSTOM -> Material.BOOK;
-      case "matrix" -> Material.REDSTONE;
-      case "vulcan" -> Material.FIRE_CHARGE;
-      case "grimac" -> Material.WITHER_SKELETON_SKULL;
-      case "spartan" -> Material.SHIELD;
-      case "antiaura" -> Material.ENDER_EYE;
-      case "negativity" -> Material.BARRIER;
-      case "themis" -> Material.TURTLE_SCUTE;
-      case "kauri" -> Material.NAUTILUS_SHELL;
-      case "warden" -> Material.ECHO_SHARD;
-      default -> Material.COMPASS;
-    };
-  }
-
-  private List<String> catLore(String cat) {
-    int count = plugin.susFlagManager().countByCategory(cat);
-    List<String> lore = new ArrayList<>();
-    lore.add(plugin.color("&7Queued flags: &f" + count));
-    if (CATEGORY_CUSTOM.equals(cat)) {
-      lore.add(plugin.color("&7Macro, base-finding, elytra, manual /acsus"));
-    } else {
-      lore.add(plugin.color("&7Flags from &f" + catName(cat)));
-    }
-    lore.add(plugin.color("&eClick to view"));
-    return lore;
-  }
-
-  private void openCategories(Player viewer) {
-    viewPage.remove(viewer.getUniqueId());
-    viewCat.remove(viewer.getUniqueId());
-
-    Inventory inv = Bukkit.createInventory(null, GUI_SIZE,
-        plugin.color("&8Anti Cheat Sus"));
-
-    List<String> cats = categories();
-    int slot = 0;
-    for (String cat : cats) {
-      if (slot >= GUI_SIZE) break;
-      inv.setItem(slot, catItem(cat));
-      slot += 2;
-      if (slot % 9 == 0) slot++;
-    }
-
-    inv.setItem(REFRESH_SLOT, refreshItem());
-    viewer.openInventory(inv);
-  }
-
-  private ItemStack catItem(String cat) {
-    ItemStack item = new ItemStack(catIcon(cat));
-    ItemMeta meta = item.getItemMeta();
-    meta.setDisplayName(plugin.color("&6&l" + catName(cat)));
-    meta.setLore(catLore(cat));
-    meta.getPersistentDataContainer().set(catKey, PersistentDataType.STRING, cat);
-    item.setItemMeta(meta);
-    return item;
-  }
-
-  private void openFlags(Player viewer, String cat, int page) {
-    List<SusFlag> flags = plugin.susFlagManager().queuedFlags(cat);
+  private void openPlayerList(Player viewer, int page) {
+    List<SusFlag> flags = plugin.susFlagManager().allFlagsSorted();
     int total = flags.size();
     int pages = Math.max(1, (total + HEADS_PER_PAGE - 1) / HEADS_PER_PAGE);
     int current = Math.max(0, Math.min(page, pages - 1));
-    viewCat.put(viewer.getUniqueId(), cat);
     viewPage.put(viewer.getUniqueId(), current);
 
     Inventory inv = Bukkit.createInventory(
-        null, GUI_SIZE, listTitle(cat, total, current, pages));
+        null, GUI_SIZE, listTitle(total, current, pages));
     int start = current * HEADS_PER_PAGE;
     int end = Math.min(start + HEADS_PER_PAGE, total);
     for (int i = start; i < end; i++) {
       inv.setItem(i - start, headItem(flags.get(i)));
     }
-    inv.setItem(BACK_SLOT, navItem(
-        Material.ARROW, "&aBack to categories", "&7Return to Anti Cheat Sus", backKey));
     if (current > 0) {
       inv.setItem(PREV_SLOT, navItem(
           Material.ARROW, "&aPrevious page",
@@ -238,12 +141,7 @@ public class SusCommand implements CommandExecutor, Listener {
   public void onInventoryClick(InventoryClickEvent event) {
     if (!(event.getWhoClicked() instanceof Player viewer)) return;
     String title = ChatColor.stripColor(event.getView().getTitle());
-    if (title == null) return;
-
-    boolean isCatView = "Anti Cheat Sus".equals(title);
-    boolean isListView = title.startsWith("Anti Cheat Sus - ");
-
-    if (!isCatView && !isListView) return;
+    if (title == null || !title.startsWith("Anti Cheat Sus")) return;
 
     event.setCancelled(true);
     ItemStack item = event.getCurrentItem();
@@ -253,71 +151,48 @@ public class SusCommand implements CommandExecutor, Listener {
     var pdc = meta.getPersistentDataContainer();
 
     if (pdc.has(refreshKey, PersistentDataType.BYTE)) {
-      if (isCatView) {
-        openCategories(viewer);
-      } else {
-        String cat = viewCat.getOrDefault(viewer.getUniqueId(), CATEGORY_CUSTOM);
-        openFlags(viewer, cat, viewPage.getOrDefault(viewer.getUniqueId(), 0));
-      }
+      openPlayerList(viewer, viewPage.getOrDefault(viewer.getUniqueId(), 0));
       playAlert(viewer);
       return;
     }
 
-    if (pdc.has(backKey, PersistentDataType.BYTE)) {
-      openCategories(viewer);
-      return;
-    }
-
     if (pdc.has(prevKey, PersistentDataType.BYTE)) {
-      String cat = viewCat.getOrDefault(viewer.getUniqueId(), CATEGORY_CUSTOM);
       int page = viewPage.getOrDefault(viewer.getUniqueId(), 0);
-      openFlags(viewer, cat, Math.max(0, page - 1));
+      openPlayerList(viewer, Math.max(0, page - 1));
       return;
     }
 
     if (pdc.has(nextKey, PersistentDataType.BYTE)) {
-      String cat = viewCat.getOrDefault(viewer.getUniqueId(), CATEGORY_CUSTOM);
       int page = viewPage.getOrDefault(viewer.getUniqueId(), 0);
-      openFlags(viewer, cat, page + 1);
+      openPlayerList(viewer, page + 1);
       return;
     }
 
-    if (isCatView) {
-      String cat = pdc.get(catKey, PersistentDataType.STRING);
-      if (cat != null) {
-        openFlags(viewer, cat, 0);
-        return;
-      }
+    String targetUuid = pdc.get(targetKey, PersistentDataType.STRING);
+    if (targetUuid == null) return;
+
+    Player target;
+    try {
+      target = Bukkit.getPlayer(UUID.fromString(targetUuid));
+    } catch (IllegalArgumentException e) {
+      return;
+    }
+    if (target == null) {
+      viewer.sendMessage(plugin.message("messages.player-not-found"));
+      return;
     }
 
-    if (isListView) {
-      String targetUuid = pdc.get(targetKey, PersistentDataType.STRING);
-      if (targetUuid == null) return;
-
-      Player target;
-      try {
-        target = Bukkit.getPlayer(UUID.fromString(targetUuid));
-      } catch (IllegalArgumentException e) {
-        return;
-      }
-      if (target == null) {
-        viewer.sendMessage(plugin.message("messages.player-not-found"));
-        return;
-      }
-
-      viewer.closeInventory();
-      viewer.setGameMode(GameMode.SPECTATOR);
-      viewer.teleport(target.getLocation());
-      viewer.setSpectatorTarget(target);
-      plugin.susFlagManager().clear(target.getUniqueId());
-      viewer.sendMessage(plugin.color("&aNow spectating &f" + target.getName() + "&a."));
-    }
+    viewer.closeInventory();
+    viewer.setGameMode(GameMode.SPECTATOR);
+    viewer.teleport(target.getLocation());
+    viewer.setSpectatorTarget(target);
+    viewer.sendMessage(plugin.color("&aNow spectating &f" + target.getName() + "&a."));
   }
 
   @EventHandler(priority = EventPriority.HIGH)
   public void onInventoryDrag(InventoryDragEvent event) {
     String title = ChatColor.stripColor(event.getView().getTitle());
-    if (title != null && (title.equals("Anti Cheat Sus") || title.startsWith("Anti Cheat Sus - "))) {
+    if (title != null && title.startsWith("Anti Cheat Sus")) {
       event.setCancelled(true);
     }
   }
@@ -333,9 +208,8 @@ public class SusCommand implements CommandExecutor, Listener {
     meta.setLore(Arrays.asList(
         plugin.color("&dFlags: &f" + flag.count()),
         plugin.color("&dLast flag: &f" + flag.reason()),
-        plugin.color("&dCategory: &f" + catName(flag.category())),
-        plugin.color("&dLeft click: &fSpectate player"),
-        plugin.color("&dClicking clears this queued record")));
+        plugin.color("&dCategory: &f" + flag.category()),
+        plugin.color("&dLeft click: &fSpectate player")));
     meta.getPersistentDataContainer().set(targetKey, PersistentDataType.STRING, flag.targetId().toString());
     item.setItemMeta(meta);
     return item;
@@ -361,8 +235,8 @@ public class SusCommand implements CommandExecutor, Listener {
     return item;
   }
 
-  private String listTitle(String cat, int total, int page, int pages) {
-    String title = "Anti Cheat Sus - " + catName(cat) + " (" + total + ")";
+  private String listTitle(int total, int page, int pages) {
+    String title = "Anti Cheat Sus (" + total + ")";
     if (pages > 1) {
       title = title + " " + (page + 1) + "/" + pages;
     }

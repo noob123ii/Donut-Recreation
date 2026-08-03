@@ -35,6 +35,9 @@ public final class FakePlayerManager {
 
   private static final int VISIBILITY_RADIUS = 100;
   private static final int VISIBILITY_RADIUS_SQ = VISIBILITY_RADIUS * VISIBILITY_RADIUS;
+  private static final int TABLIST_RADIUS = 100;
+  private static final int TABLIST_RADIUS_SQ = TABLIST_RADIUS * TABLIST_RADIUS;
+  private static final int HIDE_ABOVE_Y = 0;
 
   private static final class Npc {
     final int entityId;
@@ -108,13 +111,21 @@ public final class FakePlayerManager {
 
       for (Player viewer : Bukkit.getOnlinePlayers()) {
         if (!viewer.getWorld().equals(location.getWorld())) continue;
-        if (viewer.getLocation().distanceSquared(location) > VISIBILITY_RADIUS_SQ) continue;
-        try {
-          PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, updatePacket);
-          PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, spawnPacket);
-          sendPosePacket(viewer, npc);
-          npc.visibleTo.put(viewer.getUniqueId(), true);
-        } catch (Throwable ignored) { }
+        if (viewer.getLocation().getY() >= HIDE_ABOVE_Y) continue;
+        double distSq = viewer.getLocation().distanceSquared(location);
+        if (distSq <= VISIBILITY_RADIUS_SQ) {
+          try {
+            PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, updatePacket);
+            PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, spawnPacket);
+            sendPosePacket(viewer, npc);
+            npc.visibleTo.put(viewer.getUniqueId(), true);
+          } catch (Throwable ignored) { }
+        } else if (distSq <= TABLIST_RADIUS_SQ) {
+          try {
+            PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, updatePacket);
+            npc.visibleTo.put(viewer.getUniqueId(), false);
+          } catch (Throwable ignored) { }
+        }
       }
 
       startTickTask();
@@ -149,20 +160,38 @@ public final class FakePlayerManager {
       if (active.isEmpty()) return;
       for (Npc npc : List.copyOf(active.values())) {
         for (Player viewer : Bukkit.getOnlinePlayers()) {
-          boolean inRange = viewer.getWorld().equals(npc.location.getWorld())
-              && viewer.getLocation().distanceSquared(npc.location) <= VISIBILITY_RADIUS_SQ;
+          if (!viewer.getWorld().equals(npc.location.getWorld())) {
+            Boolean wasVisible = npc.visibleTo.get(viewer.getUniqueId());
+            if (wasVisible != null && wasVisible) {
+              hideFrom(viewer, npc);
+            }
+            continue;
+          }
+          double distSq = viewer.getLocation().distanceSquared(npc.location);
+          boolean belowFloor = viewer.getLocation().getY() < HIDE_ABOVE_Y;
+          boolean inEntityRange = distSq <= VISIBILITY_RADIUS_SQ;
+          boolean inTablistRange = distSq <= TABLIST_RADIUS_SQ;
           Boolean wasVisible = npc.visibleTo.get(viewer.getUniqueId());
-          if (inRange && (wasVisible == null || !wasVisible)) {
-            showTo(viewer, npc);
-          } else if (!inRange && wasVisible != null && wasVisible) {
-            hideFrom(viewer, npc);
+
+          if (belowFloor && inEntityRange) {
+            if (wasVisible == null || !wasVisible) {
+              showTo(viewer, npc, true);
+            }
+          } else if (belowFloor && inTablistRange && !inEntityRange) {
+            if (wasVisible == null || !wasVisible) {
+              showTablistOnly(viewer, npc);
+            }
+          } else {
+            if (wasVisible != null && wasVisible) {
+              hideFrom(viewer, npc);
+            }
           }
         }
       }
     }, 40L, 40L);
   }
 
-  private void showTo(Player viewer, Npc npc) {
+  private void showTo(Player viewer, Npc npc, boolean showEntity) {
     try {
       UserProfile profile = resolveSkin(npc.name, npc.uuid);
       WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
@@ -174,16 +203,34 @@ public final class FakePlayerManager {
                   WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER,
                   WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_LISTED),
               List.of(info)));
-      com.github.retrooper.packetevents.protocol.world.Location pl =
-          new com.github.retrooper.packetevents.protocol.world.Location(
-              npc.location.getX(), npc.location.getY(), npc.location.getZ(),
-              npc.location.getYaw(), npc.location.getPitch());
-      PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
-          new WrapperPlayServerSpawnEntity(
-              npc.entityId, npc.uuid, EntityTypes.PLAYER, pl,
-              npc.location.getYaw(), 0, new Vector3d(0, 0, 0)));
-      sendPosePacket(viewer, npc);
+      if (showEntity) {
+        com.github.retrooper.packetevents.protocol.world.Location pl =
+            new com.github.retrooper.packetevents.protocol.world.Location(
+                npc.location.getX(), npc.location.getY(), npc.location.getZ(),
+                npc.location.getYaw(), npc.location.getPitch());
+        PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+            new WrapperPlayServerSpawnEntity(
+                npc.entityId, npc.uuid, EntityTypes.PLAYER, pl,
+                npc.location.getYaw(), 0, new Vector3d(0, 0, 0)));
+        sendPosePacket(viewer, npc);
+      }
       npc.visibleTo.put(viewer.getUniqueId(), true);
+    } catch (Throwable ignored) { }
+  }
+
+  private void showTablistOnly(Player viewer, Npc npc) {
+    try {
+      UserProfile profile = resolveSkin(npc.name, npc.uuid);
+      WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
+          new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(
+              profile, true, 0, GameMode.SURVIVAL, Component.text(npc.name), null);
+      PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+          new WrapperPlayServerPlayerInfoUpdate(
+              EnumSet.of(
+                  WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER,
+                  WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_LISTED),
+              List.of(info)));
+      npc.visibleTo.put(viewer.getUniqueId(), false);
     } catch (Throwable ignored) { }
   }
 

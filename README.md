@@ -14,16 +14,24 @@ Tested on **Paper 1.21.4**. Requires **Java 21**.
 ## Commands
 
 ### `/acsus [player] [reason]`
-Chest GUI listing flagged players. Click a head to spectate that player. The behaviour
-tracker flags sustained elytra flights, mining bursts, and macro-like repetition in the
-background.
+Chest GUI listing all flagged players. Click a head to spectate that player. No category
+layer — goes straight to the player list. Behaviour tracker flags sustained elytra flights,
+mining bursts, macro-like repetition, and anti-cheat plugin flags in the background.
+
+Anti-cheat detection notifications are broadcast to staff in the format:
+`[Matrix] PlayerName: hack reason (N flags)`
 
 ### `/offend <player> <reason>` (alias `/punish`)
 Bans and optionally wipes player data. Reasons defined in `config.yml` under `punishments:`.
-Bans stored in `playerdata.db` for alt-detection. OP-only.
+Each ban gets a unique **Ban ID** (e.g. `BAN-1234`) that never repeats. Kick messages show
+time remaining instead of an expiry date. Bans stored in `playerdata.db` for alt-detection.
+OP-only.
 
 ### `/unban <player>`
 Unbans a player and clears their evader flag. OP-only.
+
+### `/unwipe <player>`
+Unwipes a player — removes their ban and resets their data. OP-only.
 
 ### `/spawnfake <stash|spawner|player|bedrockspawner>`
 Spawns ephemeral ghost-blocks and NPCs. Requires staffmode.
@@ -34,9 +42,13 @@ Spawns ephemeral ghost-blocks and NPCs. Requires staffmode.
 
 ### `/staffmode`
 Toggles staff mode. Blocks non-whitelisted commands while active. Required for `/spawnfake`.
+Action bar shows green "Staffmode: Enabled" or red "Staffmode: Disabled" on toggle.
+
+### `/staffmode showtps`
+Toggles a live TPS/ping display in the action bar for staff.
 
 ### `/donut reload`
-Reloads config without restart. OP-only.
+Reloads config without restart. Works from both console and in-game. OP-only.
 
 ### `/donut chunk generate <border>`
 Generates a chunk border. OP-only.
@@ -54,9 +66,12 @@ Not a traditional ore-obfuscator — masks everything below a configurable Y-lev
 - Upper (`barrier-upper-y`): the band between lower and upper is masked while the player
   is above the upper threshold. Set equal to hide-below-y to disable.
 
-**Geode hiding:** Real amethyst clusters, budding amethyst, calcite and smooth basalt are
-masked when geode chunks aren't revealed. Prevents cheat clients from triangulating bases
-via geode shapes.
+**Geode hiding:** Fake amethyst geodes generated underground with realistic Minecraft layers:
+smooth basalt shell, calcite ring, amethyst block/budding amethyst layer (8% budding chance),
+and a deepslate core with amethyst clusters and buds. Generated in ~8% of chunks between
+Y=-40 and Y=10. Geode data persists across restarts.
+
+**Spawner masking:** Spawners above the floor are replaced with deepslate and cannot be broken.
 
 **Tile-entity masking:** Chests, shulkers, hoppers, spawners below the barrier sent as
 AIR until the viewer is within render distance.
@@ -75,9 +90,23 @@ suppressed or re-spatialised.
 
 On every join, if the player shares an IP with someone currently banned:
 
-- `strict` — auto-ban the new account for 1 month
+- `strict` — auto-ban the new account for 1 month (requires 5+ banned alts on same IP)
 - `new-accounts-only` — auto-ban only if the account is younger than `alt-ban-account-min-age-hours` or has never joined from that IP before (default)
 - `flag-only` — never auto-ban, only flag
+
+Below the threshold, alts are flagged and staff are notified.
+
+---
+
+## Punishment System
+
+Punishments are configured in `config.yml` under `punishments:`. Each reason supports:
+- `BanTime` — ban duration (e.g. `1d`, `1mo`, `lifetime`)
+- `MuteTime` — mute duration via LuckPerms (e.g. `10m`, `1h`)
+- `ResetData` — wipe inventory, ender chest, and stats on punish
+
+Ban records are stored with a unique Ban ID that can be used to link accounts.
+Time is shown as remaining duration (e.g. "2d 5h 30m") rather than an expiry date.
 
 ---
 
@@ -109,15 +138,22 @@ Output: `build/libs/DonutRecreation.jar`
 - `hider.max-revealed-chunks-per-player` — memory vs coverage tradeoff
 - `punishments:` — reason/duration/data-wipe per offence type
 - `alt-ban-policy` — strict / new-accounts-only / flag-only
+- `alt-ban-threshold` — minimum banned alts on same IP before auto-ban (default 5)
 
 ---
 
 ## Data Files
 
 Single YAML database at `plugins/DonutRecreation/playerdata.db`:
-- `bans:` — all bans with reason, expiry, IP, evader flag
+- `bans:` — all bans with Ban ID, reason, time remaining, IP, evader flag
 - `profiles:` — per-UUID join history, client brand, IPs
 - `ips:` — reverse index from IP to UUIDs
+
+Geode data cached in `plugins/DonutRecreation/geode-cache/`:
+- `scanned.dat` — which chunks have been scanned
+- `geodes.dat` — stored geode positions
+
+Staff mode state persisted in `plugins/DonutRecreation/staffdata.yml`.
 
 Flushed async every ~10 seconds and on disable. Safe to delete for a clean slate.
 

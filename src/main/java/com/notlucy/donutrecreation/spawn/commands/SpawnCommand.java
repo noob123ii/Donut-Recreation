@@ -35,7 +35,7 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   private static final long ONE_HOUR_TICKS = 20L * 60 * 60;
   private static final int STASH_BROADCAST_RADIUS = 64;
   private static final List<String> SUBCOMMANDS = List.of(
-      "stash", "spawner", "player", "bedrockspawner");
+      "stash", "spawner", "player", "bedrockspawner", "clear");
   private static final String[] REALISTIC_NAMES = {
       "xXShadowXx", "DarkSlayer", "Herobrine", "CreeperHugger",
       "DiamondDude", "NoobMaster69", "PVPKing", "EnderFox",
@@ -71,12 +71,12 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
-    if (!plugin.isStaffModeActive()) {
-      sender.sendMessage(plugin.color("&cEnable staff mode with /staffmode to use that command."));
-      return true;
-    }
     if (!(sender instanceof Player player)) {
       sender.sendMessage(plugin.message("messages.player-only"));
+      return true;
+    }
+    if (!plugin.isStaffModeActive(player.getUniqueId())) {
+      sender.sendMessage(plugin.color("&cEnable staff mode with /staffmode to use that command."));
       return true;
     }
     if (args.length < 1) {
@@ -93,6 +93,10 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       case "spawner" -> spawnFakeSpawner(player);
       case "player" -> spawnFakePlayer(player);
       case "bedrockspawner" -> spawnFakeBedrockSpawner(player);
+      case "clear" -> {
+        ghosts.revertAllFor(player.getUniqueId());
+        player.sendMessage(plugin.color("&aCleared all your spawned ghost blocks."));
+      }
       default -> player.sendMessage(plugin.color("&cUnknown decoy. Valid: &f"
           + String.join(", ", SUBCOMMANDS)));
     }
@@ -150,7 +154,8 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       }
     }
     Location origin = player.getLocation().getBlock().getLocation();
-    List<GhostBlockManager.GhostBlock> ghostList = template.toGhostBlocks(origin);
+    List<GhostBlockManager.GhostBlock> ghostList =
+        template.toGhostBlocks(origin, player.getLocation().getYaw());
     long id = ghosts.broadcast(ghostList, FIVE_MIN_TICKS, STASH_BROADCAST_RADIUS,
         () -> fakeEntities.despawnAllFor(player));
     int viewerCount = 0;
@@ -224,13 +229,15 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       ((AmethystCluster) bud).setFacing(hole.budFacing);
     }
     BlockData obsidian = Material.OBSIDIAN.createBlockData();
+    BlockData air = Material.AIR.createBlockData();
+
+    int npcX = npcLoc.getBlockX();
+    int npcY = npcLoc.getBlockY();
+    int npcZ = npcLoc.getBlockZ();
 
     List<GhostBlockManager.GhostBlock> blocks = new ArrayList<>();
     blocks.add(new GhostBlockManager.GhostBlock(spawnerLoc, spawner));
     blocks.add(new GhostBlockManager.GhostBlock(budLoc, bud));
-    int npcX = npcLoc.getBlockX();
-    int npcY = npcLoc.getBlockY();
-    int npcZ = npcLoc.getBlockZ();
     for (int dx = -1; dx <= 1; dx++) {
       for (int dz = -1; dz <= 1; dz++) {
         if (dx == 0 && dz == 0) {
@@ -243,6 +250,13 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       }
     }
 
+    int npcFeetY = npcLoc.getBlockY();
+    int npcHeadY = npcFeetY + 1;
+    blocks.add(new GhostBlockManager.GhostBlock(
+        new Location(world, npcLoc.getX(), npcFeetY, npcLoc.getZ()), air));
+    blocks.add(new GhostBlockManager.GhostBlock(
+        new Location(world, npcLoc.getX(), npcHeadY, npcLoc.getZ()), air));
+
     String fakeName = REALISTIC_NAMES[
         ThreadLocalRandom.current().nextInt(REALISTIC_NAMES.length)];
     npcs.spawn(npcLoc, fakeName, ONE_HOUR_TICKS, true);
@@ -251,14 +265,14 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       revealManager.forceRevealGeodeChunk(player, npcLoc.getBlockX() >> 4, npcLoc.getBlockZ() >> 4);
     }
 
-    long blockGroupId = ghosts.send(player, blocks, FIVE_MIN_TICKS, null);
+    long blockGroupId = ghosts.broadcast(blocks, FIVE_MIN_TICKS, STASH_BROADCAST_RADIUS, null);
     ghosts.setRevertOnInteract(blockGroupId, true);
 
     player.sendMessage(plugin.color(
         "&aFake bedrock spawner set up at &f" + format(npcLoc)
             + " &a(group #" + blockGroupId
             + ", spawner @ " + format(spawnerLoc)
-            + ", bud @ " + format(npcLoc.getBlock().getLocation())
+            + ", bud @ " + format(budLoc)
             + ", NPC " + fakeName + " crawling)."));
   }
 

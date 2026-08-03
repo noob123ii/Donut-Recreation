@@ -58,7 +58,15 @@ public final class BlockIdRegistry {
   private int netherrackId;
   private int airId;
   private int floorId;
+  private int spawnerId;
   private int decoyClusterId;
+  private int amethystBlockId;
+  private int calciteId;
+  private int smoothBasaltId;
+  private int mediumBudId;
+  private int largeBudId;
+  private int smallBudId;
+  private int buddingAmethystId;
   private int[] floorPalette;
   private ClientVersion version;
 
@@ -68,8 +76,23 @@ public final class BlockIdRegistry {
     this.netherrackId = WrappedBlockState.getDefaultState(version, StateTypes.NETHERRACK).getGlobalId();
     this.airId = WrappedBlockState.getDefaultState(version, StateTypes.AIR).getGlobalId();
     this.floorId = WrappedBlockState.getDefaultState(version, StateTypes.DEEPSLATE).getGlobalId();
+    this.spawnerId = WrappedBlockState.getDefaultState(version, StateTypes.SPAWNER).getGlobalId();
     this.decoyClusterId = WrappedBlockState
         .getDefaultState(version, StateTypes.AMETHYST_CLUSTER).getGlobalId();
+    this.amethystBlockId = WrappedBlockState
+        .getDefaultState(version, StateTypes.AMETHYST_BLOCK).getGlobalId();
+    this.calciteId = WrappedBlockState
+        .getDefaultState(version, StateTypes.CALCITE).getGlobalId();
+    this.smoothBasaltId = WrappedBlockState
+        .getDefaultState(version, StateTypes.SMOOTH_BASALT).getGlobalId();
+    this.mediumBudId = WrappedBlockState
+        .getDefaultState(version, StateTypes.MEDIUM_AMETHYST_BUD).getGlobalId();
+    this.largeBudId = WrappedBlockState
+        .getDefaultState(version, StateTypes.LARGE_AMETHYST_BUD).getGlobalId();
+    this.smallBudId = WrappedBlockState
+        .getDefaultState(version, StateTypes.SMALL_AMETHYST_BUD).getGlobalId();
+    this.buddingAmethystId = WrappedBlockState
+        .getDefaultState(version, StateTypes.BUDDING_AMETHYST).getGlobalId();
     this.floorPalette = buildFloorPalette(version);
 
     BitSet amethystBits = new BitSet(8192);
@@ -155,8 +178,44 @@ public final class BlockIdRegistry {
     return floorId;
   }
 
+  public int spawnerId() {
+    return spawnerId;
+  }
+
+  public boolean isSpawner(int id) {
+    return id == spawnerId;
+  }
+
   public int decoyClusterId() {
     return decoyClusterId;
+  }
+
+  public int amethystBlockId() {
+    return amethystBlockId;
+  }
+
+  public int calciteId() {
+    return calciteId;
+  }
+
+  public int smoothBasaltId() {
+    return smoothBasaltId;
+  }
+
+  public int mediumBudId() {
+    return mediumBudId;
+  }
+
+  public int largeBudId() {
+    return largeBudId;
+  }
+
+  public int smallBudId() {
+    return smallBudId;
+  }
+
+  public int buddingAmethystId() {
+    return buddingAmethystId;
   }
 
   public int floorIdAt(int salt, int x, int y, int z) {

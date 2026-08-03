@@ -1,6 +1,9 @@
 package com.notlucy.donutrecreation;
 
 import java.util.Objects;
+import java.util.Set;
+import java.util.Locale;
+import java.util.UUID;
 
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
@@ -21,6 +24,7 @@ import com.notlucy.donutrecreation.commands.ChunkGenerator;
 import com.notlucy.donutrecreation.commands.DonutCommand;
 import com.notlucy.donutrecreation.punish.commands.PunishCommand;
 import com.notlucy.donutrecreation.punish.commands.UnbanCommand;
+import com.notlucy.donutrecreation.punish.commands.UnwipeCommand;
 import com.notlucy.donutrecreation.punish.listeners.AltBanListener;
 import com.notlucy.donutrecreation.punish.store.PlayerDataStore;
 import com.notlucy.donutrecreation.spawn.commands.SpawnCommand;
@@ -42,7 +46,10 @@ import java.io.File;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import io.papermc.lib.PaperLib;
-import org.bukkit.event.player.PlayerCommandSendEvent;
+import net.luckperms.api.LuckPerms;
+import net.luckperms.api.LuckPermsProvider;
+import net.luckperms.api.model.user.User;
+import net.luckperms.api.node.types.PermissionNode;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public class DonutRecreation extends JavaPlugin {
@@ -54,7 +61,8 @@ public class DonutRecreation extends JavaPlugin {
   private FakePlayerManager fakePlayerManager;
   private FakeEntityManager fakeEntityManager;
   private DonutCommand donutCommand;
-  private boolean staffModeActive;
+  private final java.util.Set<java.util.UUID> staffModeActive = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final java.util.Set<java.util.UUID> showTpsEnabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
   @Override
   public void onLoad() {
@@ -93,10 +101,17 @@ public class DonutRecreation extends JavaPlugin {
     }
 
     UnbanCommand unbanCommand = new UnbanCommand(this, playerDataStore);
-    var unbanCmd = getCommand("unoffend");
+    var unbanCmd = getCommand("unban");
     if (unbanCmd != null) {
       unbanCmd.setExecutor(unbanCommand);
       unbanCmd.setTabCompleter(unbanCommand);
+    }
+
+    UnwipeCommand unwipeCommand = new UnwipeCommand(this, playerDataStore);
+    var unwipeCmd = getCommand("unwipe");
+    if (unwipeCmd != null) {
+      unwipeCmd.setExecutor(unwipeCommand);
+      unwipeCmd.setTabCompleter(unwipeCommand);
     }
 
     donutCommand = new DonutCommand(this, playerDataStore);
@@ -136,6 +151,22 @@ public class DonutRecreation extends JavaPlugin {
           e.setCancelled(true);
         }
       }
+
+      @EventHandler
+      public void onBlockBreak(org.bukkit.event.block.BlockBreakEvent e) {
+        if (ghostBlockManager.isGhostBlockAt(e.getBlock().getLocation())) {
+          e.setCancelled(true);
+          e.setDropItems(false);
+          e.setExpToDrop(0);
+        }
+      }
+
+      @EventHandler
+      public void onBlockDrop(org.bukkit.event.block.BlockDropItemEvent e) {
+        if (ghostBlockManager.isGhostBlockAt(e.getBlock().getLocation())) {
+          e.setCancelled(true);
+        }
+      }
     }, this);
     SpawnCommand spawnCommand = new SpawnCommand(
         this, ghostBlockManager, fakePlayerManager, fakeEntityManager, stashManager, revealManager);
@@ -147,27 +178,62 @@ public class DonutRecreation extends JavaPlugin {
 
     Objects.requireNonNull(getCommand("staffmode")).setExecutor(
         (sender, cmd, label, args) -> {
+          if (!(sender instanceof Player)) {
+            sender.sendMessage(message("messages.no-permission"));
+            return true;
+          }
           if (!sender.hasPermission("donutrecreation.*")) {
             sender.sendMessage(message("messages.no-permission"));
             return true;
           }
-          staffModeActive = !staffModeActive;
-          sender.sendMessage(color("&aStaff mode " + (staffModeActive ? "enabled" : "disabled") + "."));
-          getLogger().info(sender.getName() + " toggled staff mode " + staffModeActive);
+          Player player = (Player) sender;
+          UUID pid = player.getUniqueId();
+          if (args.length > 0 && args[0].equalsIgnoreCase("showtps")) {
+            boolean newState = !showTpsEnabled.contains(pid);
+            if (newState) {
+              showTpsEnabled.add(pid);
+            } else {
+              showTpsEnabled.remove(pid);
+            }
+            sender.sendMessage(color("&aTPS display " + (newState ? "enabled" : "disabled") + "."));
+            if (!newState) {
+              player.sendActionBar(color(""));
+            }
+            return true;
+          }
+          boolean newState = !staffModeActive.contains(pid);
+          if (newState) {
+            staffModeActive.add(pid);
+          } else {
+            staffModeActive.remove(pid);
+            showTpsEnabled.remove(pid);
+          }
+          toggleLuckPermsPermission(player, "donutrecreation.staff.staffmode", newState);
+          saveStaffData();
+          sender.sendMessage(color("&aStaff mode " + (newState ? "enabled" : "disabled") + "."));
+          if (newState) {
+            player.sendActionBar(color("&a&lStaffmode: Enabled"));
+          } else {
+            player.sendActionBar(color("&c&lStaffmode: Disabled"));
+          }
+          getLogger().info(sender.getName() + " toggled staff mode " + newState);
           return true;
         });
     var staffListener = new Listener() {
-      private final java.util.Set<String> STAFF_CMDS = java.util.Set.of(
-          "gmc", "gmsp", "gms", "acsus", "spawnfake", "offend", "punish", "unban", "unoffend", "donut", "staffmode");
+      private final Set<String> STAFF_CMDS = Set.of(
+          "acsus", "spawnfake", "offend", "punish", "unban", "unwipe", "unoffend", "donut", "staffmode");
+      private final Set<String> GAMEMODE_CMDS = Set.of("gmc", "gmsp", "gms", "gamemode");
 
       @EventHandler
       public void onCommand(org.bukkit.event.player.PlayerCommandPreprocessEvent e) {
         if (!e.getPlayer().hasPermission("donutrecreation.*")) return;
-        String label = e.getMessage().substring(1).split(" ")[0].toLowerCase(java.util.Locale.ROOT);
-        if ("staffmode".equals(label)) return;
-        boolean isStaff = STAFF_CMDS.contains(label);
-        if (staffModeActive) {
-          if (!isStaff) {
+        String label = e.getMessage().substring(1).split(" ")[0].toLowerCase(Locale.ROOT);
+        String base = label.contains(":") ? label.substring(label.lastIndexOf(':') + 1) : label;
+        if ("staffmode".equals(base)) return;
+        boolean isStaff = STAFF_CMDS.contains(base);
+        boolean isGamemode = GAMEMODE_CMDS.contains(base);
+        if (staffModeActive.contains(e.getPlayer().getUniqueId())) {
+          if (!isStaff && !isGamemode) {
             e.setCancelled(true);
             e.getPlayer().sendMessage(color("&cThat command is disabled while staff mode is active."));
           }
@@ -180,10 +246,12 @@ public class DonutRecreation extends JavaPlugin {
       }
 
       @EventHandler
-      public void onTabList(PlayerCommandSendEvent e) {
+      public void onTabList(org.bukkit.event.player.PlayerCommandSendEvent e) {
         if (!e.getPlayer().hasPermission("donutrecreation.*")) return;
-        if (staffModeActive) {
-          e.getCommands().retainAll(STAFF_CMDS);
+        if (staffModeActive.contains(e.getPlayer().getUniqueId())) {
+          Set<String> allowed = new java.util.HashSet<>(STAFF_CMDS);
+          allowed.addAll(GAMEMODE_CMDS);
+          e.getCommands().retainAll(allowed);
         } else {
           e.getCommands().removeAll(STAFF_CMDS);
           e.getCommands().add("staffmode");
@@ -238,10 +306,84 @@ public class DonutRecreation extends JavaPlugin {
     }, this);
 
     setupHider();
+    startTpsDisplay();
+    loadStaffData();
+  }
+
+  private void startTpsDisplay() {
+    getServer().getScheduler().runTaskTimer(this, () -> {
+      double tps = getServer().getTPS()[0];
+      String color;
+      if (tps >= 19.0) color = "&a";
+      else if (tps >= 15.0) color = "&e";
+      else color = "&c";
+      for (Player p : getServer().getOnlinePlayers()) {
+        if (showTpsEnabled.contains(p.getUniqueId())) {
+          String pMsg = color + "TPS: " + String.format("%.1f", Math.min(20.0, tps))
+              + " &7| Ping: &f" + p.getPing() + "ms";
+          p.sendActionBar(color(pMsg));
+        }
+      }
+    }, 40L, 40L);
+  }
+
+  private void saveStaffData() {
+    try {
+      java.io.File file = new java.io.File(getDataFolder(), "staffdata.yml");
+      var config = new java.util.LinkedHashMap<String, Object>();
+      config.put("staff-uuids", new java.util.ArrayList<>(staffModeActive.stream()
+          .map(UUID::toString).toList()));
+      var header = new StringBuilder();
+      header.append("# Auto-saved staff data\n");
+      java.util.List<String> lines = new java.util.ArrayList<>();
+      lines.add(header.toString());
+      lines.add("staff-uuids:");
+      for (UUID id : staffModeActive) {
+        lines.add("  - " + id.toString());
+      }
+      java.nio.file.Files.write(file.toPath(), lines);
+    } catch (Throwable ignored) {
+    }
+  }
+
+  private void loadStaffData() {
+    try {
+      java.io.File file = new java.io.File(getDataFolder(), "staffdata.yml");
+      if (!file.exists()) return;
+      java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
+      for (String line : lines) {
+        line = line.trim();
+        if (line.startsWith("- ")) {
+          UUID id = UUID.fromString(line.substring(2));
+          staffModeActive.add(id);
+        }
+      }
+      for (UUID pid : staffModeActive) {
+        Player player = getServer().getPlayer(pid);
+        if (player != null && player.hasPermission("donutrecreation.*")) {
+          toggleLuckPermsPermission(player, "donutrecreation.staff.staffmode", true);
+        }
+      }
+    } catch (Throwable ignored) {
+    }
   }
 
   @Override
   public void onDisable() {
+    for (UUID pid : staffModeActive) {
+      Player player = getServer().getPlayer(pid);
+      if (player != null && player.hasPermission("donutrecreation.*")) {
+        toggleLuckPermsPermission(player, "donutrecreation.staff.staffmode", false);
+      }
+    }
+    staffModeActive.clear();
+    showTpsEnabled.clear();
+    if (revealManager != null) {
+      try {
+        revealManager.saveGeodeData();
+      } catch (Throwable ignored) {
+      }
+    }
     if (packetHider != null) {
       try {
         packetHider.unregister();
@@ -302,7 +444,10 @@ public class DonutRecreation extends JavaPlugin {
     }
     try {
       revealManager = new RevealManager(this);
+      revealManager.setGhostBlockManager(ghostBlockManager);
+      revealManager.loadGeodeData();
       packetHider = new PacketHider(revealManager);
+      packetHider.setGhostBlockManager(ghostBlockManager);
       packetHider.register();
       if (donutCommand != null) {
         donutCommand.setPacketHider(packetHider);
@@ -347,7 +492,27 @@ public class DonutRecreation extends JavaPlugin {
   }
   
   public boolean isStaffModeActive() {
-    return staffModeActive;
+    return false;
+  }
+
+  public boolean isStaffModeActive(UUID playerId) {
+    return staffModeActive.contains(playerId);
+  }
+
+  private void toggleLuckPermsPermission(Player player, String permission, boolean grant) {
+    try {
+      LuckPerms api = LuckPermsProvider.get();
+      User user = api.getUserManager().getUser(player.getUniqueId());
+      if (user == null) return;
+      if (grant) {
+        user.data().add(PermissionNode.builder(permission).build());
+      } else {
+        user.data().remove(PermissionNode.builder(permission).build());
+      }
+      api.getUserManager().saveUser(user);
+    } catch (Throwable e) {
+      getLogger().warning("[staffmode] LuckPerms not available or failed: " + e.getMessage());
+    }
   }
 
   @SuppressFBWarnings(

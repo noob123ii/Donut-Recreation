@@ -5,11 +5,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
 import org.bukkit.Bukkit;
@@ -37,7 +35,6 @@ public final class LitematicConverter {
         LogData.get().warning("[stash] litematic empty: " + litematicFile.getName());
         return;
       }
-      fillAirBlocks(blocks);
       YamlConfiguration yaml = new YamlConfiguration();
       String baseName = litematicFile.getName()
           .replaceAll("(?i)\\.litematic$", "");
@@ -191,62 +188,11 @@ public final class LitematicConverter {
 
   private static BlockData parseBlockData(String minecraftName) {
     try {
-      BlockData data = Bukkit.createBlockData(minecraftName);
-      if (data instanceof org.bukkit.block.data.Directional dir) {
-        dir.setFacing(rotateFacing(dir.getFacing()));
-      }
-      return data;
+      return Bukkit.createBlockData(minecraftName);
     } catch (IllegalArgumentException e) {
       LogData.get().fine("[stash] no Bukkit block data for " + minecraftName);
       return null;
     }
-  }
-
-  private static org.bukkit.block.BlockFace rotateFacing(org.bukkit.block.BlockFace facing) {
-    return switch (facing) {
-      case NORTH -> org.bukkit.block.BlockFace.SOUTH;
-      case SOUTH -> org.bukkit.block.BlockFace.NORTH;
-      case EAST -> org.bukkit.block.BlockFace.WEST;
-      case WEST -> org.bukkit.block.BlockFace.EAST;
-      default -> facing;
-    };
-  }
-
-  private static void fillAirBlocks(List<StashManager.StashBlock> blocks) {
-    if (blocks.isEmpty()) {
-      return;
-    }
-    int minX = Integer.MAX_VALUE;
-    int maxX = Integer.MIN_VALUE;
-    int minY = Integer.MAX_VALUE;
-    int maxY = Integer.MIN_VALUE;
-    int minZ = Integer.MAX_VALUE;
-    int maxZ = Integer.MIN_VALUE;
-    for (StashManager.StashBlock b : blocks) {
-      minX = Math.min(minX, b.x);
-      maxX = Math.max(maxX, b.x);
-      minY = Math.min(minY, b.y);
-      maxY = Math.max(maxY, b.y);
-      minZ = Math.min(minZ, b.z);
-      maxZ = Math.max(maxZ, b.z);
-    }
-    Set<String> occupied = new HashSet<>();
-    for (StashManager.StashBlock b : blocks) {
-      occupied.add(b.x + "," + b.y + "," + b.z);
-    }
-    BlockData air = Material.AIR.createBlockData();
-    int added = 0;
-    for (int bx = minX; bx <= maxX; bx++) {
-      for (int by = minY; by <= maxY; by++) {
-        for (int bz = minZ; bz <= maxZ; bz++) {
-          if (!occupied.contains(bx + "," + by + "," + bz)) {
-            blocks.add(new StashManager.StashBlock(bx, by, bz, air));
-            added++;
-          }
-        }
-      }
-    }
-    LogData.get().info("[stash] filled " + added + " air blocks in bounding box");
   }
 
   private static final class NbtReader {

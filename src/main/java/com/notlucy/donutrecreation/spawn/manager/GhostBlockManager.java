@@ -21,13 +21,16 @@ public final class GhostBlockManager {
   public static final class GhostGroup {
     public final UUID viewerId;
     public final List<Location> locations;
+    public final List<GhostBlock> ghostBlocks;
     public final long expiresAtTick;
     public Runnable onRevert;
     public boolean revertOnInteract;
 
-    public GhostGroup(UUID viewerId, List<Location> locations, long expiresAtTick) {
+    public GhostGroup(UUID viewerId, List<Location> locations, List<GhostBlock> ghostBlocks,
+        long expiresAtTick) {
       this.viewerId = viewerId;
       this.locations = locations;
+      this.ghostBlocks = ghostBlocks;
       this.expiresAtTick = expiresAtTick;
     }
   }
@@ -44,6 +47,7 @@ public final class GhostBlockManager {
 
   private final Plugin plugin;
   private final ConcurrentMap<Long, GhostGroup> groups = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, ConcurrentMap<Long, List<GhostBlock>>> perPlayerChunks = new ConcurrentHashMap<>();
   private final AtomicLong nextId = new AtomicLong();
 
   @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Plugin is shared by Bukkit.")
@@ -51,13 +55,24 @@ public final class GhostBlockManager {
     this.plugin = plugin;
   }
 
+  public boolean hasGhostBlockAt(UUID playerId, int x, int y, int z) {
+    ConcurrentMap<Long, List<GhostBlock>> playerChunks = perPlayerChunks.get(playerId);
+    if (playerChunks == null) return false;
+    long key = chunkKey(x >> 4, z >> 4);
+    List<GhostBlock> ghosts = playerChunks.get(key);
+    if (ghosts == null) return false;
+    for (GhostBlock g : ghosts) {
+      if (g.location.getBlockX() == x && g.location.getBlockY() == y && g.location.getBlockZ() == z) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public long broadcast(List<GhostBlock> ghosts, long ttlTicks, int radius, Runnable onRevert) {
     if (ghosts == null || ghosts.isEmpty()) return -1L;
-    Location center = ghosts.get(0).location;
     long firstId = -1L;
     for (Player viewer : Bukkit.getOnlinePlayers()) {
-      if (!viewer.getWorld().equals(center.getWorld())) continue;
-      if (viewer.getLocation().distanceSquared(center) > (double) radius * radius) continue;
       long id = send(viewer, ghosts, ttlTicks, onRevert);
       if (firstId == -1L) firstId = id;
     }
@@ -70,12 +85,19 @@ public final class GhostBlockManager {
     }
     List<Location> sentLocations = new ArrayList<>(ghosts.size());
     Map<Long, Map<Location, BlockData>> batches = new HashMap<>();
+    UUID viewerId = viewer.getUniqueId();
+    ConcurrentMap<Long, List<GhostBlock>> playerChunks =
+        perPlayerChunks.computeIfAbsent(viewerId, k -> new ConcurrentHashMap<>());
     for (GhostBlock ghost : ghosts) {
       try {
         Location loc = ghost.location;
-        long key = chunkKey(loc.getBlockX() >> 4, loc.getBlockZ() >> 4);
+        int cx = loc.getBlockX() >> 4;
+        int cz = loc.getBlockZ() >> 4;
+        long key = chunkKey(cx, cz);
         batches.computeIfAbsent(key, ignored -> new HashMap<>()).put(loc, ghost.data);
         sentLocations.add(ghost.location);
+        playerChunks.computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>())
+            .add(ghost);
       } catch (Throwable ignored) {
       }
     }
@@ -86,7 +108,7 @@ public final class GhostBlockManager {
       }
     }
     long id = nextId.incrementAndGet();
-    GhostGroup group = new GhostGroup(viewer.getUniqueId(), sentLocations,
+    GhostGroup group = new GhostGroup(viewerId, sentLocations, ghosts,
         Bukkit.getCurrentTick() + ttlTicks);
     group.onRevert = onRevert;
     groups.put(id, group);
@@ -115,6 +137,7 @@ public final class GhostBlockManager {
         }
       }
     }
+    removeGroupFromPerPlayerChunks(group);
     if (group.onRevert != null) {
       try {
         group.onRevert.run();
@@ -130,6 +153,7 @@ public final class GhostBlockManager {
   }
 
   public void revertAllFor(UUID viewerId) {
+    perPlayerChunks.remove(viewerId);
     for (Long id : new ArrayList<>(groups.keySet())) {
       GhostGroup group = groups.get(id);
       if (group != null && group.viewerId.equals(viewerId)) {
@@ -165,7 +189,102 @@ public final class GhostBlockManager {
     return false;
   }
 
+  public boolean isGhostBlock(Location loc) {
+    if (loc == null) return false;
+    for (GhostGroup group : groups.values()) {
+      for (Location gl : group.locations) {
+        if (gl.equals(loc)) return true;
+      }
+    }
+    return false;
+  }
+
+  public boolean isGhostBlockAt(Location loc) {
+    if (loc == null) return false;
+    for (GhostGroup group : groups.values()) {
+      for (Location gl : group.locations) {
+        if (gl.getBlockX() == loc.getBlockX()
+            && gl.getBlockY() == loc.getBlockY()
+            && gl.getBlockZ() == loc.getBlockZ()) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  public void resendForChunk(UUID viewerId, Player viewer, int chunkX, int chunkZ) {
+    if (viewer == null || !viewer.isOnline()) return;
+    ConcurrentMap<Long, List<GhostBlock>> playerChunks = perPlayerChunks.get(viewerId);
+    if (playerChunks == null) return;
+    long key = chunkKey(chunkX, chunkZ);
+    List<GhostBlock> ghosts = playerChunks.get(key);
+    if (ghosts == null || ghosts.isEmpty()) return;
+    Map<Location, BlockData> batch = new HashMap<>(ghosts.size());
+    for (GhostBlock ghost : ghosts) {
+      if (ghost.location.getWorld() != null
+          && ghost.location.getWorld().equals(viewer.getWorld())) {
+        batch.put(ghost.location, ghost.data);
+      }
+    }
+    if (!batch.isEmpty()) {
+      try {
+        viewer.sendMultiBlockChange(batch);
+      } catch (Throwable ignored) {
+      }
+    }
+  }
+
+  public void resendAllForPlayer(UUID viewerId, Player viewer) {
+    if (viewer == null || !viewer.isOnline()) return;
+    ConcurrentMap<Long, List<GhostBlock>> playerChunks = perPlayerChunks.get(viewerId);
+    if (playerChunks == null || playerChunks.isEmpty()) return;
+    for (Map.Entry<Long, List<GhostBlock>> entry : playerChunks.entrySet()) {
+      List<GhostBlock> ghosts = entry.getValue();
+      if (ghosts == null || ghosts.isEmpty()) continue;
+      Map<Location, BlockData> batch = new HashMap<>(ghosts.size());
+      for (GhostBlock ghost : ghosts) {
+        if (ghost.location.getWorld() != null
+            && ghost.location.getWorld().equals(viewer.getWorld())) {
+          batch.put(ghost.location, ghost.data);
+        }
+      }
+      if (!batch.isEmpty()) {
+        try {
+          viewer.sendMultiBlockChange(batch);
+        } catch (Throwable ignored) {
+        }
+      }
+    }
+  }
+
+  private void removeGroupFromPerPlayerChunks(GhostGroup group) {
+    ConcurrentMap<Long, List<GhostBlock>> playerChunks = perPlayerChunks.get(group.viewerId);
+    if (playerChunks == null) return;
+    for (GhostBlock ghost : group.ghostBlocks) {
+      long key = chunkKey(ghost.location.getBlockX() >> 4, ghost.location.getBlockZ() >> 4);
+      List<GhostBlock> list = playerChunks.get(key);
+      if (list != null) {
+        list.removeIf(g -> g.location.equals(ghost.location));
+        if (list.isEmpty()) {
+          playerChunks.remove(key);
+        }
+      }
+    }
+    if (playerChunks.isEmpty()) {
+      perPlayerChunks.remove(group.viewerId);
+    }
+  }
+
   private static long chunkKey(int x, int z) {
     return ((long) x << 32) ^ (z & 0xffffffffL);
+  }
+
+  private static int keyX(long key) {
+    return (int) (key >> 32);
+  }
+
+  private static int keyZ(long key) {
+    return (int) key;
   }
 }

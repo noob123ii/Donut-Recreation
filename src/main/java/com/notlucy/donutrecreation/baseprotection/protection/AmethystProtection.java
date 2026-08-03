@@ -70,6 +70,8 @@ public final class AmethystProtection {
       return false;
     }
 
+    enhanceGeodeBuds(sections, positions, minSection);
+
     int swapped = maskPositions(sections, positions, minSection, rm.hideBelowY(), player.getWorld());
     if (swapped <= 0) {
       return false;
@@ -192,7 +194,7 @@ public final class AmethystProtection {
     }
 
     Set<Long> clustered = new HashSet<>();
-    if (allAmethyst.size() < 200) {
+    if (allAmethyst.size() < 20) {
 
       return clustered;
     }
@@ -226,12 +228,40 @@ public final class AmethystProtection {
         }
       }
 
-      if (neighbors >= 10) {
+      if (neighbors >= 3) {
         clustered.add(packed);
       }
     }
 
     return clustered;
+  }
+
+  private void enhanceGeodeBuds(BaseChunk[] sections, Set<Long> positions, int minSection) {
+    int largeBudId = ids.largeBudId();
+    int replaced = 0;
+    for (long packed : positions) {
+      int wx = RevealManager.unpackX(packed);
+      int wy = RevealManager.unpackY(packed);
+      int wz = RevealManager.unpackZ(packed);
+      int idx = (wy >> 4) - minSection;
+      if (idx < 0 || idx >= sections.length) continue;
+      BaseChunk s = sections[idx];
+      if (s == null) continue;
+      int lx = wx & 0xF;
+      int ly = wy & 0xF;
+      int lz = wz & 0xF;
+      int currentId = s.getBlockId(lx, ly, lz);
+      if (ids.isAmethyst(currentId) && currentId != ids.decoyClusterId()
+          && currentId != ids.amethystBlockId()) {
+        int h = (wx * 374761393 ^ wz * 668265263 ^ wy * 1274126177);
+        h = (h ^ (h >> 13)) * 1274126177;
+        h = h ^ (h >> 16);
+        if ((h & 0x7FFFFFFF) % 9 == 0) {
+          s.set(lx, ly, lz, largeBudId);
+          replaced++;
+        }
+      }
+    }
   }
 
   private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection, int floorY, World world) {

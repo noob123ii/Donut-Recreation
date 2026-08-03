@@ -41,6 +41,7 @@ public class PacketHider {
   private final ParticleDamper particles;
   private final ExplosionDamper explosions;
   private final WorldEffectDamper worldEffects;
+  private com.notlucy.donutrecreation.spawn.manager.GhostBlockManager ghostBlockManager;
   private final AtomicInteger failureCount = new AtomicInteger();
   private PacketListenerAbstract listener;
 
@@ -85,6 +86,10 @@ public class PacketHider {
         + registry.oreCount() + " ore states (" + v + ")");
   }
 
+  public void setGhostBlockManager(com.notlucy.donutrecreation.spawn.manager.GhostBlockManager gbm) {
+    this.ghostBlockManager = gbm;
+  }
+
   private final class Listener extends PacketListenerAbstract {
     Listener() {
       super(PacketListenerPriority.MONITOR);
@@ -110,6 +115,11 @@ public class PacketHider {
           case PacketType.Play.Server.EXPLOSION -> explosions.handle(event, player);
           case PacketType.Play.Server.EFFECT,
                PacketType.Play.Server.BLOCK_BREAK_ANIMATION -> worldEffects.handle(event, player);
+          case PacketType.Play.Server.ENTITY_RELATIVE_MOVE,
+               PacketType.Play.Server.ENTITY_TELEPORT -> dispatchEntityMove(event, player);
+          case PacketType.Play.Server.ENTITY_EQUIPMENT -> dispatchEntityEquipment(event, player);
+          case PacketType.Play.Server.ENTITY_METADATA -> dispatchEntityMetadata(event, player);
+          case PacketType.Play.Server.BLOCK_ACTION -> dispatchBlockAction(event, player);
           default -> {}
         }
       } catch (Throwable error) {
@@ -201,7 +211,7 @@ public class PacketHider {
     int y = pos.getY();
     int z = pos.getZ();
 
-    if (y < rm.upperBarrierY()) {
+    if (y < rm.hideBelowY()) {
       int cx = x >> 4, cz = z >> 4;
       if (!rm.isRevealed(player, cx, cz)) {
         event.setCancelled(true);
@@ -221,6 +231,16 @@ public class PacketHider {
       event.markForReEncode(true);
       return;
     }
+
+    if (y >= rm.hideBelowY()) {
+      var blockState = wrapper.getBlockState();
+      if (blockState != null && deepslate.isSpawner(blockState.getGlobalId())) {
+        wrapper.setBlockState(
+            com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState
+                .getByGlobalId(deepslate.floorId()));
+        event.markForReEncode(true);
+      }
+    }
   }
 
   private void dispatchMultiBlockChange(PacketSendEvent event, Player player) {
@@ -239,25 +259,36 @@ public class PacketHider {
     }
     int cx = section.getX();
     int cz = section.getZ();
+
     boolean chunkRevealed = rm.isRevealed(player, cx, cz);
     boolean upperRevealed = rm.isUpperRevealed(player, cx, cz);
     int salt = rm.saltFor(player.getUniqueId());
 
     int floorFixes = 0;
+    int spawnerFixes = 0;
+    int floorId = deepslate.floorId();
+    int spawnerId = deepslate.spawnerId();
     for (WrapperPlayServerMultiBlockChange.EncodedBlock enc : blocks) {
+      if (ghostBlockManager != null
+          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), enc.getX(), enc.getY(), enc.getZ())) {
+        continue;
+      }
       if (deepslate.shouldMaskMultiBlock(enc.getY(), chunkRevealed, upperRevealed)) {
         int wantId = deepslate.floorIdAt(salt, enc.getX(), enc.getY(), enc.getZ());
         if (enc.getBlockId() != wantId) {
           enc.setBlockId(wantId);
           floorFixes++;
         }
+      } else if (enc.getY() >= rm.hideBelowY() && enc.getBlockId() == spawnerId) {
+        enc.setBlockId(floorId);
+        spawnerFixes++;
       }
     }
 
     int tileFixes = deepslate.maskTilesMultiBlock(wrapper, player);
     int amFixes = amethyst.rewriteMultiBlock(wrapper, player, chunkRevealed, floorFixes);
 
-    if (floorFixes > 0 || amFixes > 0 || tileFixes > 0) {
+    if (floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || tileFixes > 0) {
       event.markForReEncode(true);
     }
   }
@@ -269,15 +300,22 @@ public class PacketHider {
       return;
     }
 
-    if (entityType == EntityTypes.PLAYER) {
-      return;
-    }
-
     var position = wrapper.getPosition();
     if (position == null) {
       return;
     }
     double y = position.getY();
+
+    if (entityType == EntityTypes.PLAYER) {
+      if (y < rm.upperBarrierY()) {
+        int cx = (int) Math.floor(position.getX()) >> 4;
+        int cz = (int) Math.floor(position.getZ()) >> 4;
+        if (!rm.isRevealed(player, cx, cz)) {
+          event.setCancelled(true);
+        }
+      }
+      return;
+    }
 
     if (y < rm.upperBarrierY()) {
       int cx = (int) Math.floor(position.getX()) >> 4;
@@ -285,6 +323,75 @@ public class PacketHider {
       if (!rm.isRevealed(player, cx, cz)) {
         event.setCancelled(true);
       }
+    }
+  }
+
+  private void dispatchEntityMove(PacketSendEvent event, Player player) {
+    try {
+      var packetType = event.getPacketType();
+      if (packetType == PacketType.Play.Server.ENTITY_METADATA) {
+        return;
+      }
+      if (packetType != PacketType.Play.Server.ENTITY_TELEPORT) {
+        return;
+      }
+      var w = new com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityTeleport(event);
+      double x = w.getPosition().getX();
+      double y = w.getPosition().getY();
+      double z = w.getPosition().getZ();
+      if (y < rm.upperBarrierY()) {
+        int cx = (int) Math.floor(x) >> 4;
+        int cz = (int) Math.floor(z) >> 4;
+        if (!rm.isRevealed(player, cx, cz)) {
+          event.setCancelled(true);
+        }
+      }
+    } catch (Throwable ignored) {
+    }
+  }
+
+  private void dispatchEntityEquipment(PacketSendEvent event, Player player) {
+    try {
+      var loc = player.getLocation();
+      int cx = loc.getBlockX() >> 4;
+      int cz = loc.getBlockZ() >> 4;
+      if (!rm.isRevealed(player, cx, cz)) {
+        event.setCancelled(true);
+      }
+    } catch (Throwable ignored) {
+    }
+  }
+
+  private void dispatchBlockAction(PacketSendEvent event, Player player) {
+    try {
+      var w = new com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockAction(event);
+      var pos = w.getBlockPosition();
+      if (pos == null) return;
+      int y = pos.getY();
+      if (y < rm.hideBelowY()) {
+        int cx = pos.getX() >> 4, cz = pos.getZ() >> 4;
+        if (!rm.isRevealed(player, cx, cz)) {
+          event.setCancelled(true);
+        }
+      } else if (y < rm.upperBarrierY()) {
+        int cx = pos.getX() >> 4, cz = pos.getZ() >> 4;
+        if (!rm.isUpperRevealed(player, cx, cz)) {
+          event.setCancelled(true);
+        }
+      }
+    } catch (Throwable ignored) {
+    }
+  }
+
+  private void dispatchEntityMetadata(PacketSendEvent event, Player player) {
+    try {
+      var loc = player.getLocation();
+      int cx = loc.getBlockX() >> 4;
+      int cz = loc.getBlockZ() >> 4;
+      if (!rm.isRevealed(player, cx, cz)) {
+        event.setCancelled(true);
+      }
+    } catch (Throwable ignored) {
     }
   }
 }

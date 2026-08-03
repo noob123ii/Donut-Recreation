@@ -39,6 +39,111 @@ public class BehaviorTracker implements Listener {
 
   public void start() {
     Bukkit.getScheduler().runTaskTimer(plugin, this::tick, 20L, 20L);
+    registerAntiCheatListeners();
+  }
+
+  private void registerAntiCheatListeners() {
+    registerVulcanListener();
+    registerGrimListener();
+    registerMatrixListener();
+    registerNCPListener();
+    registerAACListener();
+  }
+
+  private void registerVulcanListener() {
+    try {
+      Class.forName("com.github.retrooper.vulcan.VulcanFlagEvent");
+      Bukkit.getPluginManager().registerEvents(new Listener() {
+        @EventHandler
+        public void onVulcanFlag(org.bukkit.event.Event event) {
+          try {
+            Player player = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+            String reason = (String) event.getClass().getMethod("getReason").invoke(event);
+            plugin.susFlagManager().flag(player, reason, "vulcan");
+            broadcastFlag(player, "Vulcan", reason);
+          } catch (Throwable ignored) { }
+        }
+      }, plugin);
+    } catch (ClassNotFoundException ignored) { }
+  }
+
+  private void registerGrimListener() {
+    try {
+      Class.forName("me.grimmreaper42.grimac.GrimPlayer");
+      Bukkit.getPluginManager().registerEvents(new Listener() {
+        @EventHandler
+        public void onGrimFlag(org.bukkit.event.Event event) {
+          try {
+            Player player = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+            String verbose = (String) event.getClass().getMethod("getVerbose").invoke(event);
+            plugin.susFlagManager().flag(player, verbose, "grimac");
+            broadcastFlag(player, "GrimAC", verbose);
+          } catch (Throwable ignored) { }
+        }
+      }, plugin);
+    } catch (ClassNotFoundException ignored) { }
+  }
+
+  private void registerMatrixListener() {
+    try {
+      Class.forName("com.github.Reflact.Matrix.Matrix");
+      Bukkit.getPluginManager().registerEvents(new Listener() {
+        @EventHandler
+        public void onMatrixFlag(org.bukkit.event.Event event) {
+          try {
+            Player player = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+            String hack = (String) event.getClass().getMethod("getHackType").invoke(event);
+            plugin.susFlagManager().flag(player, hack, "matrix");
+            broadcastFlag(player, "Matrix", hack);
+          } catch (Throwable ignored) { }
+        }
+      }, plugin);
+    } catch (ClassNotFoundException ignored) { }
+  }
+
+  private void registerNCPListener() {
+    try {
+      Class.forName("fr.neatmonster.nocheatplus.checks.CheckType");
+      Bukkit.getPluginManager().registerEvents(new Listener() {
+        @EventHandler
+        public void onNCPViolation(org.bukkit.event.Event event) {
+          try {
+            Player player = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+            plugin.susFlagManager().flag(player, "Violation", "ncp");
+            broadcastFlag(player, "NoCheatPlus", "Violation");
+          } catch (Throwable ignored) { }
+        }
+      }, plugin);
+    } catch (ClassNotFoundException ignored) { }
+  }
+
+  private void registerAACListener() {
+    try {
+      Class.forName("me.maxHenrikDev.AAC.AAC");
+      Bukkit.getPluginManager().registerEvents(new Listener() {
+        @EventHandler
+        public void onAACFlag(org.bukkit.event.Event event) {
+          try {
+            Player player = (Player) event.getClass().getMethod("getPlayer").invoke(event);
+            String violation = (String) event.getClass().getMethod("getViolationLevel").invoke(event);
+            plugin.susFlagManager().flag(player, "Violation level " + violation, "aac");
+            broadcastFlag(player, "AAC", "Violation level " + violation);
+          } catch (Throwable ignored) { }
+        }
+      }, plugin);
+    } catch (ClassNotFoundException ignored) { }
+  }
+
+  private void broadcastFlag(Player player, String antiCheat, String reason) {
+    var flag = plugin.susFlagManager().getFlag(player.getUniqueId());
+    int count = flag != null ? flag.count() : 1;
+    String msg = plugin.color("&c[" + antiCheat + "] &f" + player.getName()
+        + " &7" + reason + " &c(" + count + " flags)");
+    Bukkit.getOnlinePlayers().stream()
+        .filter(p -> p.hasPermission("donutrecreation.*"))
+        .forEach(op -> op.sendMessage(msg));
+    plugin.getLogger().info("[AntiCheat] " + antiCheat + " flagged " + player.getName()
+        + ": " + reason + " (" + count + " flags)");
   }
 
   private void tick() {

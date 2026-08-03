@@ -27,17 +27,10 @@ public final class DeepslateProtection {
 
   private final RevealManager rm;
   private final BlockIdRegistry ids;
-  private final int decoyMask;
-  private final boolean decoyEnabled;
 
   public DeepslateProtection(RevealManager rm, BlockIdRegistry ids) {
     this.rm = rm;
     this.ids = ids;
-    int rateBits = Math.max(0, Math.min(20,
-        rm.plugin().getConfig().getInt("hider.decoy-amethyst-rate-bits", 11)));
-    this.decoyEnabled = rm.plugin().getConfig().getBoolean("hider.decoy-amethyst-enabled", true)
-        && rateBits > 0;
-    this.decoyMask = (1 << rateBits) - 1;
   }
 
   public boolean rewriteChunk(
@@ -69,6 +62,7 @@ public final class DeepslateProtection {
     boolean upperActive = upperY > floorY;
 
     boolean touched = false;
+    boolean tilesChanged = false;
     int modifiedSections = 0;
     int nullSections = 0;
     for (int i = 0; i < sections.length; i++) {
@@ -85,7 +79,7 @@ public final class DeepslateProtection {
       if (!lowerRevealed) {
         int hi = Math.min(16, floorY - worldOriginY);
         if (hi > 0) {
-          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, 0, hi, salt);
+          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, 0, hi, salt, player);
           touched = true;
           modifiedSections++;
         }
@@ -94,7 +88,7 @@ public final class DeepslateProtection {
         int lo = Math.max(0, floorY - worldOriginY);
         int hi = Math.min(16, upperY - worldOriginY);
         if (hi > lo) {
-          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, lo, hi, salt);
+          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, lo, hi, salt, player);
           touched = true;
           modifiedSections++;
         }
@@ -129,10 +123,26 @@ public final class DeepslateProtection {
           }
         }
       }
-    }
 
-    boolean tilesChanged = handleTiles(column, sections, minSection, cx, cz,
+      int spawnerFloorId = ids.floorId();
+      int spawnerMasked = 0;
+      for (int x = 0; x < 16; x++) {
+        for (int z = 0; z < 16; z++) {
+          for (int y = Math.max(0, floorY - worldOriginY); y < 16; y++) {
+            if (section.getBlockId(x, y, z) == ids.spawnerId()) {
+              section.set(x, y, z, spawnerFloorId);
+              spawnerMasked++;
+            }
+          }
+        }
+      }
+      if (spawnerMasked > 0) {
+        touched = true;
+      }
+
+      tilesChanged = handleTiles(column, sections, minSection, cx, cz,
         player, lowerRevealed, upperRevealed);
+    }
 
     if (touched || nullSections > 0) {
       if (!lowerRevealed) {
@@ -346,38 +356,161 @@ public final class DeepslateProtection {
 
   private void fillNoise(
       BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
-      int lowY, int highY, int salt) {
-    boolean decoy = decoyEnabled;
-    int decoyId = decoy ? ids.decoyClusterId() : 0;
-    int dmask = decoyMask;
+      int lowY, int highY, int salt, Player player) {
+    java.util.UUID playerId = player.getUniqueId();
+    long worldSeed = rm.plugin().getServer().getWorlds().get(0).getSeed();
     for (int x = 0; x < 16; x++) {
       int wx = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
         int wz = worldOriginZ + z;
         for (int y = lowY; y < highY; y++) {
           int wy = worldOriginY + y;
-          int target = ids.floorIdAt(salt, wx, wy, wz);
-          if (decoy && (decoyHash(salt, wx, wy, wz) & dmask) == 0) {
-            target = decoyId;
+          if (rm.hasGhostBlockAt(playerId, wx, wy, wz)) {
+            continue;
           }
-          if (section.getBlockId(x, y, z) != target) {
-            section.set(x, y, z, target);
+          int geodeBlock = fakeGeodeAt(worldSeed, salt, wx, wy, wz);
+          if (geodeBlock != 0) {
+            if (section.getBlockId(x, y, z) != geodeBlock) {
+              section.set(x, y, z, geodeBlock);
+            }
+          } else {
+            int target = ids.floorIdAt(salt, wx, wy, wz);
+            if (section.getBlockId(x, y, z) != target) {
+              section.set(x, y, z, target);
+            }
           }
         }
       }
     }
   }
 
-  private static int decoyHash(int salt, int x, int y, int z) {
-    int h = (x ^ salt) * 0x27D4EB2D;
-    h ^= Integer.rotateLeft((z ^ salt) * 0x165667B1, 11);
-    h ^= Integer.rotateLeft(y * 0xD2511F53, 7);
-    h ^= (h >>> 17);
+  private int fakeGeodeAt(long worldSeed, int salt, int wx, int wy, int wz) {
+    if (wy > 5) return 0;
+
+    int chunkX = wx >> 4;
+    int chunkZ = wz >> 4;
+    int chance = Math.abs(geodeNoise(chunkX, 999, chunkZ, salt) % 100);
+    if (chance > 8) return 0;
+
+    int gx = chunkX * 32 + Math.abs(geodeNoise(chunkX, 0, chunkZ, salt) % 32);
+    int gz = chunkZ * 32 + Math.abs(geodeNoise(chunkX, 1, chunkZ, salt) % 32);
+    int gy = -40 + Math.abs(geodeNoise(chunkX, 2, chunkZ, salt) % 50);
+
+    int h0 = geodeNoise(gx, 100, gz, salt);
+    int h1 = geodeNoise(gx, 101, gz, salt);
+    int h2 = geodeNoise(gx, 102, gz, salt);
+    int h3 = geodeNoise(gx, 103, gz, salt);
+
+    double outerWallDist = 3.5 + (h0 & 0x3) * 0.2;
+    double outerDistSum = 0;
+    for (int p = 0; p < 4; p++) {
+      double px = gx + ((geodeNoise(gx, p * 3, gz, salt) & 0xF) - 8) * 0.35;
+      double py = gy + ((geodeNoise(gx, p * 3 + 1, gz, salt) & 0xF) - 8) * 0.3;
+      double pz = gz + ((geodeNoise(gx, p * 3 + 2, gz, salt) & 0xF) - 8) * 0.35;
+      double ddx = wx - px;
+      double ddy = wy - py;
+      double ddz = wz - pz;
+      double distSq = ddx * ddx + ddy * ddy + ddz * ddz;
+      outerDistSum += fastInvSqrt(distSq + 1.0);
+    }
+    double noiseVal = pseudoPerlin(wx, wy, wz, salt) * 0.04;
+    double outerDist = (outerDistSum + noiseVal) / outerWallDist;
+    if (outerDist > 1.0) {
+      return 0;
+    }
+
+    double calciteThickness = 2.8 + (h1 & 0x3) * 0.3;
+    double amethystThickness = 1.8 + (h2 & 0x3) * 0.2;
+    double fillingThickness = 1.2 + (h3 & 0x3) * 0.15;
+
+    double calciteThreshold = 1.0 / Math.sqrt(calciteThickness);
+    double amethystThreshold = 1.0 / Math.sqrt(amethystThickness);
+    double fillingThreshold = 1.0 / Math.sqrt(fillingThickness);
+
+    if (outerDist > calciteThreshold) {
+      return ids.smoothBasaltId();
+    }
+    if (outerDist > amethystThreshold) {
+      return ids.calciteId();
+    }
+
+    int h = geodeNoise(wx, wy, wz, salt);
+    if (outerDist > fillingThreshold) {
+      if ((h & 0x7FFFFFFF) % 12 == 0) {
+        return ids.buddingAmethystId();
+      }
+      return ids.amethystBlockId();
+    }
+
+    if (outerDist > fillingThreshold * 0.75 && (h & 0x7FFFFFFF) % 10 == 0) {
+      return ids.decoyClusterId();
+    }
+
+    int coreHash = (h & 0x7FFFFFFF) % 20;
+    if (coreHash == 0) return ids.largeBudId();
+    if (coreHash == 1) return ids.mediumBudId();
+    if (coreHash == 2) return ids.smallBudId();
+    if (coreHash == 3) return ids.buddingAmethystId();
+    if (coreHash < 7) return ids.amethystBlockId();
+    return ids.floorId();
+  }
+
+  private static double fastInvSqrt(double x) {
+    if (x <= 0) return 0;
+    double half = 0.5 * x;
+    long bits = Double.doubleToLongBits(x);
+    bits = 0x5FE6EB50C7B537AAL - (bits >> 1);
+    double guess = Double.longBitsToDouble(bits);
+    guess *= (1.5 - half * guess * guess);
+    return guess;
+  }
+
+  private static double pseudoPerlin(int x, int y, int z, int salt) {
+    int h1 = geodeNoise(x, y, z, salt);
+    int h2 = geodeNoise(x + 1, y, z, salt);
+    int h3 = geodeNoise(x, y + 1, z, salt);
+    int h4 = geodeNoise(x, y, z + 1, salt);
+    int h5 = geodeNoise(x + 1, y + 1, z, salt);
+    int h6 = geodeNoise(x + 1, y, z + 1, salt);
+    int h7 = geodeNoise(x, y + 1, z + 1, salt);
+    int h8 = geodeNoise(x + 1, y + 1, z + 1, salt);
+    double fx = (x & 1) == 0 ? 0.3 : 0.7;
+    double fy = (y & 1) == 0 ? 0.3 : 0.7;
+    double fz = (z & 1) == 0 ? 0.3 : 0.7;
+    double v000 = (h1 & 0xFFFF) / 65535.0;
+    double v100 = (h2 & 0xFFFF) / 65535.0;
+    double v010 = (h3 & 0xFFFF) / 65535.0;
+    double v001 = (h4 & 0xFFFF) / 65535.0;
+    double v110 = (h5 & 0xFFFF) / 65535.0;
+    double v101 = (h6 & 0xFFFF) / 65535.0;
+    double v011 = (h7 & 0xFFFF) / 65535.0;
+    double v111 = (h8 & 0xFFFF) / 65535.0;
+    double x0 = v000 * (1 - fx) + v100 * fx;
+    double x1 = v001 * (1 - fx) + v101 * fx;
+    double y0 = v010 * (1 - fx) + v110 * fx;
+    double y1 = v011 * (1 - fx) + v111 * fx;
+    double z0 = x0 * (1 - fy) + y0 * fy;
+    double z1 = x1 * (1 - fy) + y1 * fy;
+    return z0 * (1 - fz) + z1 * fz;
+  }
+
+  private static int geodeNoise(int x, int y, int z, int salt) {
+    int h = (x * 374761393 ^ z * 668265263 ^ y * 1274126177) + salt;
+    h = (h ^ (h >> 13)) * 1274126177;
+    h = h ^ (h >> 16);
     return h;
   }
 
   public int floorId() {
     return ids.floorId();
+  }
+
+  public boolean isSpawner(int id) {
+    return ids.isSpawner(id);
+  }
+
+  public int spawnerId() {
+    return ids.spawnerId();
   }
 
   public int floorIdAt(int salt, int x, int y, int z) {

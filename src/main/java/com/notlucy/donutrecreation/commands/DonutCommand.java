@@ -52,18 +52,23 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       return true;
     }
     if ("reload".equalsIgnoreCase(args[0])) {
-      plugin.reloadConfig();
-      if (store != null) {
-        store.reload();
+      try {
+        plugin.reloadConfig();
+        if (store != null) {
+          store.reload();
+        }
+        if (stashManager != null) {
+          stashManager.reload();
+        }
+        if (packetHider != null) {
+          packetHider.reload();
+        }
+        sender.sendMessage(plugin.color("&aConfig, player database, stash templates, and block registry reloaded."));
+        plugin.getLogger().info(sender.getName() + " reloaded config, player database, stash templates, and block registry.");
+      } catch (Throwable e) {
+        sender.sendMessage(plugin.color("&cReload failed: " + e.getMessage()));
+        plugin.getLogger().warning("[donut] reload failed: " + e);
       }
-      if (stashManager != null) {
-        stashManager.reload();
-      }
-      if (packetHider != null) {
-        packetHider.reload();
-      }
-      sender.sendMessage(plugin.color("&aConfig, player database, stash templates, and block registry reloaded."));
-      plugin.getLogger().info(sender.getName() + " reloaded config, player database, stash templates, and block registry.");
       return true;
     }
     if ("chunk".equalsIgnoreCase(args[0])) {

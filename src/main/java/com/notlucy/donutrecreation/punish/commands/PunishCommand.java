@@ -67,6 +67,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     }
 
     String banTime = section.getString("BanTime", "lifetime");
+    String muteTime = section.getString("MuteTime", null);
     boolean resetData = section.getBoolean("ResetData", false);
     Date expiry = parseTime(banTime);
 
@@ -102,24 +103,58 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     }
     if (store != null) {
       long expiresAt = expiry == null ? -1L : expiry.getTime();
+      String banId = store.generateBanId();
       store.recordBan(new PlayerDataStore.BanRecord(
+          banId,
           target.getUniqueId(),
           displayName,
           ip,
           key,
           banTime,
+          System.currentTimeMillis(),
           expiresAt,
           false));
     }
 
     plugin.susFlagManager().clear(target.getUniqueId());
 
+    if (muteTime != null && !muteTime.isEmpty() && online != null) {
+      Date muteExpiry = parseTime(muteTime);
+      long muteMs = muteExpiry == null ? -1L : muteExpiry.getTime() - System.currentTimeMillis();
+      if (muteMs > 0) {
+        try {
+          net.luckperms.api.LuckPerms lp = net.luckperms.api.LuckPermsProvider.get();
+          net.luckperms.api.model.user.User user = lp.getUserManager().getUser(target.getUniqueId());
+          if (user != null) {
+            user.data().add(net.luckperms.api.node.types.PermissionNode.builder("luckperms.chat.mute").build());
+            lp.getUserManager().saveUser(user);
+            long muteMinutes = muteMs / 60_000L;
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+              try {
+                net.luckperms.api.model.user.User u = lp.getUserManager().getUser(target.getUniqueId());
+                if (u != null) {
+                  u.data().remove(net.luckperms.api.node.types.PermissionNode.builder("luckperms.chat.mute").build());
+                  lp.getUserManager().saveUser(u);
+                }
+              } catch (Throwable ignored) { }
+            }, muteMs / 50L);
+            plugin.getLogger().info("[offend] Muted " + target.getName() + " for " + muteMinutes + "m");
+          }
+        } catch (Throwable e) {
+          plugin.getLogger().warning("[offend] Failed to mute " + target.getName() + ": " + e.getMessage());
+        }
+      }
+    }
+
+    String banIdStr = store != null ? store.lastBanFor(target.getUniqueId()).banId : "?";
     Bukkit.getOnlinePlayers().stream()
         .filter(p -> p.hasPermission("donutrecreation.*"))
         .forEach(op -> op.sendMessage(plugin.color(
             "&c[&4PUNISH&c] &f" + sender.getName() + " &7punished &f" + displayName
                 + " &7for &f" + key + " &7(&f" + banTime + "&7"
-                + (resetData ? "&7, &cdata wiped" : "") + "&7)")));
+                + (resetData ? "&7, &cdata wiped" : "")
+                + (muteTime != null ? "&7, &amuted " + muteTime : "")
+                + "&7) &8[" + banIdStr + "]")));
     sender.sendMessage(plugin.color("&aPunished &f" + displayName + " &afor &f" + key));
     return true;
   }

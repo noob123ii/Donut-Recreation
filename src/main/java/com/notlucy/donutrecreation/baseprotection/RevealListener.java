@@ -54,9 +54,14 @@ public final class RevealListener implements Listener {
     if (taskId != -1) { Bukkit.getScheduler().cancelTask(taskId); taskId = -1; }
   }
 
-  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+  @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
   public void onBlockBreak(BlockBreakEvent event) {
-    Block  block  = event.getBlock();
+    Block block = event.getBlock();
+    if (block.getType() == org.bukkit.Material.SPAWNER) {
+      event.setCancelled(true);
+      event.getPlayer().sendMessage(rm.plugin().color("&cYou cannot break spawners."));
+      return;
+    }
     Player player = event.getPlayer();
     int by    = block.getY();
     int floor = rm.hideBelowY();

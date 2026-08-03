@@ -14,6 +14,7 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockFadeEvent;
 import org.bukkit.event.block.BlockGrowEvent;
+import org.bukkit.event.block.BlockPhysicsEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
@@ -118,6 +119,14 @@ public class SpawnListener implements Listener {
       if (isAmethyst(b.getType())) {
         rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
       }
+    }
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+  public void onBlockPhysics(BlockPhysicsEvent event) {
+    Block b = event.getBlock();
+    if (isAmethyst(b.getType())) {
+      rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
     }
   }
 

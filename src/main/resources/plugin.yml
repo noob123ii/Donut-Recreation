@@ -4,6 +4,7 @@ version: "${VERSION}"
 api-version: "1.21"
 author: Notlucy
 description: Donut-style anti-freecam and /sus recreation plugin
+softdepend: [LuckPerms]
 commands:
   acsus:
     description: Open the Anti Cheat Sus GUI / mark a player suspicious
@@ -16,6 +17,9 @@ commands:
   unban:
     description: Remove a ban from a player (OP only)
     usage: "/unban <player>"
+  unwipe:
+    description: Unwipe a player's data and remove ban (OP only)
+    usage: "/unwipe <player>"
   donut:
     description: Main plugin command (OP only)
     usage: "/donut reload | /donut chunk generate <border>"
@@ -36,6 +40,9 @@ permissions:
   donutrecreation.hider.bypass:
     description: Bypasses the under-floor block hider (sees the real world below the floor)
     default: op
+  donutrecreation.staff.staffmode:
+    description: Grants access to staff commands when staffmode is active (granted by /staffmode)
+    default: false
   donutrecreation.*:
     description: Grants all DonutRecreation permissions
     default: false
@@ -43,3 +50,4 @@ permissions:
       donutrecreation.alerts: true
       donutrecreation.bypass: true
       donutrecreation.hider.bypass: true
+      donutrecreation.staff.staffmode: true
