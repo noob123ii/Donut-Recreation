@@ -4,3 +4,7 @@ build/
 .vscode/
 *.iml
 *.tmp.txt
+.devin/
+api/
+requirements.txt
+javac.*.args

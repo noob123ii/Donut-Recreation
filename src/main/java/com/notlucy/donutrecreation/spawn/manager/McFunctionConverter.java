@@ -1,6 +1,5 @@
 package com.notlucy.donutrecreation.spawn.manager;
 
-import com.notlucy.donutrecreation.util.LogData;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -10,10 +9,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.configuration.file.YamlConfiguration;
+
+import com.notlucy.donutrecreation.util.LogData;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class McFunctionConverter {
@@ -25,10 +27,15 @@ public final class McFunctionConverter {
     if (outputYml.exists()) {
       return;
     }
+    if (!mcfunctionFile.exists()) {
+      LogData.get().warning("[stash] mcfunction not found: " + mcfunctionFile.getAbsolutePath());
+      return;
+    }
     try {
       Result result = readMcFunction(mcfunctionFile, new HashSet<>());
-      if (result.blocks().isEmpty()) {
-        LogData.get().warning("[stash] mcfunction empty: " + mcfunctionFile.getName());
+      if (result.blocks().isEmpty() && result.entities().isEmpty()) {
+        LogData.get().warning("[stash] mcfunction empty (no blocks or entities): "
+            + mcfunctionFile.getName());
         return;
       }
       fillAirBlocks(result.blocks());
@@ -67,6 +74,7 @@ public final class McFunctionConverter {
     } catch (Throwable e) {
       LogData.get().warning("[stash] failed to convert "
           + mcfunctionFile.getName() + ": " + e);
+      e.printStackTrace();
     }
   }
 

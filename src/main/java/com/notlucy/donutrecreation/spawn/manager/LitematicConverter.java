@@ -1,18 +1,23 @@
 package com.notlucy.donutrecreation.spawn.manager;
 
-import com.notlucy.donutrecreation.util.LogData;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.GZIPInputStream;
+
+import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.block.data.BlockData;
 import org.bukkit.configuration.file.YamlConfiguration;
+
+import com.notlucy.donutrecreation.util.LogData;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class LitematicConverter {
@@ -22,14 +27,17 @@ public final class LitematicConverter {
 
   public static void convertIfNeeded(File litematicFile, File outputYml) {
     if (outputYml.exists()) {
+      LogData.get().info("[stash] skipping conversion (yml exists): " + litematicFile.getName());
       return;
     }
     try {
+      LogData.get().info("[stash] converting litematic: " + litematicFile.getName());
       List<StashManager.StashBlock> blocks = readLitematic(litematicFile);
       if (blocks.isEmpty()) {
         LogData.get().warning("[stash] litematic empty: " + litematicFile.getName());
         return;
       }
+      fillAirBlocks(blocks);
       YamlConfiguration yaml = new YamlConfiguration();
       String baseName = litematicFile.getName()
           .replaceAll("(?i)\\.litematic$", "");
@@ -41,7 +49,7 @@ public final class LitematicConverter {
         entry.set("x", b.x);
         entry.set("y", b.y);
         entry.set("z", b.z);
-        entry.set("material", b.data.getMaterial().name());
+        entry.set("data", b.data.getAsString());
         i++;
       }
       yaml.save(outputYml);
@@ -50,6 +58,7 @@ public final class LitematicConverter {
     } catch (Throwable e) {
       LogData.get().warning("[stash] failed to convert "
           + litematicFile.getName() + ": " + e);
+      e.printStackTrace();
     }
   }
 
@@ -93,6 +102,20 @@ public final class LitematicConverter {
       return List.of();
     }
 
+    int px = 0;
+    int py = 0;
+    int pz = 0;
+    Object posObj = region.get("Position");
+    if (posObj instanceof int[] arr && arr.length >= 3) {
+      px = arr[0];
+      py = arr[1];
+      pz = arr[2];
+    } else if (posObj instanceof Map<?, ?> m) {
+      px = ((Number) m.get("x")).intValue();
+      py = ((Number) m.get("y")).intValue();
+      pz = ((Number) m.get("z")).intValue();
+    }
+
     List<Map<String, Object>> palette =
         (List<Map<String, Object>>) region.get("BlockStatePalette");
     if (palette == null || palette.isEmpty()) {
@@ -101,7 +124,24 @@ public final class LitematicConverter {
     String[] names = new String[palette.size()];
     for (int i = 0; i < palette.size(); i++) {
       Object name = palette.get(i).get("Name");
-      names[i] = name instanceof String ? (String) name : "minecraft:air";
+      String baseName = name instanceof String ? (String) name : "minecraft:air";
+      Map<String, Object> props = (Map<String, Object>) palette.get(i).get("Properties");
+      if (props != null && !props.isEmpty()) {
+        StringBuilder sb = new StringBuilder(baseName);
+        sb.append("[");
+        boolean first = true;
+        for (Map.Entry<String, Object> entry : props.entrySet()) {
+          if (!first) {
+            sb.append(",");
+          }
+          sb.append(entry.getKey()).append("=").append(entry.getValue());
+          first = false;
+        }
+        sb.append("]");
+        names[i] = sb.toString();
+      } else {
+        names[i] = baseName;
+      }
     }
 
     long[] states;
@@ -137,26 +177,76 @@ public final class LitematicConverter {
       if (mcName.equals("minecraft:air") || mcName.equals("minecraft:cave_air")) {
         continue;
       }
-      Material mat = parseMaterial(mcName);
-      if (mat == null) {
+      BlockData data = parseBlockData(mcName);
+      if (data == null) {
         continue;
       }
       int bx = i % sx;
-      int by = (i / sx) % sy;
-      int bz = i / (sx * sy);
-      blocks.add(new StashManager.StashBlock(bx, by, bz, mat.createBlockData()));
+      int bz = (i / sx) % sz;
+      int by = i / (sx * sz);
+      blocks.add(new StashManager.StashBlock(bx + px, (sy - 1 - by) + py, bz + pz, data));
     }
     return blocks;
   }
 
-  private static Material parseMaterial(String minecraftName) {
-    String clean = minecraftName.replace("minecraft:", "").toUpperCase(Locale.ROOT);
+  private static BlockData parseBlockData(String minecraftName) {
     try {
-      return Material.valueOf(clean);
+      BlockData data = Bukkit.createBlockData(minecraftName);
+      if (data instanceof org.bukkit.block.data.Directional dir) {
+        dir.setFacing(rotateFacing(dir.getFacing()));
+      }
+      return data;
     } catch (IllegalArgumentException e) {
-      LogData.get().fine("[stash] no Bukkit material for " + minecraftName);
+      LogData.get().fine("[stash] no Bukkit block data for " + minecraftName);
       return null;
     }
+  }
+
+  private static org.bukkit.block.BlockFace rotateFacing(org.bukkit.block.BlockFace facing) {
+    return switch (facing) {
+      case NORTH -> org.bukkit.block.BlockFace.SOUTH;
+      case SOUTH -> org.bukkit.block.BlockFace.NORTH;
+      case EAST -> org.bukkit.block.BlockFace.WEST;
+      case WEST -> org.bukkit.block.BlockFace.EAST;
+      default -> facing;
+    };
+  }
+
+  private static void fillAirBlocks(List<StashManager.StashBlock> blocks) {
+    if (blocks.isEmpty()) {
+      return;
+    }
+    int minX = Integer.MAX_VALUE;
+    int maxX = Integer.MIN_VALUE;
+    int minY = Integer.MAX_VALUE;
+    int maxY = Integer.MIN_VALUE;
+    int minZ = Integer.MAX_VALUE;
+    int maxZ = Integer.MIN_VALUE;
+    for (StashManager.StashBlock b : blocks) {
+      minX = Math.min(minX, b.x);
+      maxX = Math.max(maxX, b.x);
+      minY = Math.min(minY, b.y);
+      maxY = Math.max(maxY, b.y);
+      minZ = Math.min(minZ, b.z);
+      maxZ = Math.max(maxZ, b.z);
+    }
+    Set<String> occupied = new HashSet<>();
+    for (StashManager.StashBlock b : blocks) {
+      occupied.add(b.x + "," + b.y + "," + b.z);
+    }
+    BlockData air = Material.AIR.createBlockData();
+    int added = 0;
+    for (int bx = minX; bx <= maxX; bx++) {
+      for (int by = minY; by <= maxY; by++) {
+        for (int bz = minZ; bz <= maxZ; bz++) {
+          if (!occupied.contains(bx + "," + by + "," + bz)) {
+            blocks.add(new StashManager.StashBlock(bx, by, bz, air));
+            added++;
+          }
+        }
+      }
+    }
+    LogData.get().info("[stash] filled " + added + " air blocks in bounding box");
   }
 
   private static final class NbtReader {

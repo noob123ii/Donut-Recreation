@@ -1,5 +1,18 @@
 package com.notlucy.donutrecreation.spawn.manager;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import org.bukkit.Bukkit;
+import org.bukkit.Location;
+import org.bukkit.entity.Player;
+import org.bukkit.plugin.Plugin;
+
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityData;
 import com.github.retrooper.packetevents.protocol.entity.data.EntityDataTypes;
@@ -12,17 +25,6 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDe
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityMetadata;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.notlucy.donutrecreation.util.LogData;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.entity.Player;
-import org.bukkit.plugin.Plugin;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class FakeEntityManager {
@@ -64,48 +66,48 @@ public final class FakeEntityManager {
     float pitch = 0f;
 
     switch (facing) {
-      case 0: // south
+      case 0 -> {
         yaw = 0f;
         cz += HANG_OFFSET;
-        break;
-      case 1: // west
+      }
+      case 1 -> {
         yaw = 90f;
         cx -= HANG_OFFSET;
-        break;
-      case 2: // north
+      }
+      case 2 -> {
         yaw = 180f;
         cz -= HANG_OFFSET;
-        break;
-      case 3: // east
+      }
+      case 3 -> {
         yaw = 270f;
         cx += HANG_OFFSET;
-        break;
-      case 4: // up
+      }
+      case 4 -> {
         pitch = -90f;
         cy += HANG_OFFSET;
-        break;
-      case 5: // down
+      }
+      case 5 -> {
         pitch = 90f;
         cy -= HANG_OFFSET;
-        break;
-      default:
-        break;
+      }
+      default -> {}
     }
 
     com.github.retrooper.packetevents.protocol.world.Location packetLoc =
         new com.github.retrooper.packetevents.protocol.world.Location(
             cx, cy, cz, yaw, pitch);
 
-    int spawnData = mapFacingToSpawnData(facing);
-    WrapperPlayServerSpawnEntity spawn = new WrapperPlayServerSpawnEntity(
-        entityId, uuid, type, packetLoc, yaw, spawnData,
-        new Vector3d(0, 0, 0));
-    LogData.get().info("[fakeentity] send spawn viewer=" + viewer.getName()
-        + " id=" + entityId + " type=" + type.getName()
-        + " loc=" + formatLoc(cx, cy, cz)
-        + " yaw=" + yaw + " pitch=" + pitch
-        + " facing=" + facing + " spawnData=" + spawnData);
-    PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, spawn);
+    int spawnData = facingToSpawnData(facing);
+    try {
+      WrapperPlayServerSpawnEntity spawn = new WrapperPlayServerSpawnEntity(
+          entityId, uuid, type, packetLoc, (byte) yaw, (byte) spawnData,
+          new Vector3d(0, 0, 0));
+      PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, spawn);
+    } catch (Throwable error) {
+      LogData.get().warning("[fakeentity] failed to send spawn packet id="
+          + entityId + " type=" + type.getName() + ": " + error);
+      return;
+    }
 
     try {
       ItemStack item = buildPacketItem(itemStr);
@@ -121,14 +123,43 @@ public final class FakeEntityManager {
           + entityId + " item=" + itemStr + ": " + error);
     }
 
-    trackAndSchedule(viewer, entityId, ttlTicks);
+    scheduleDespawn(viewer, entityId, ttlTicks);
   }
 
   @SuppressWarnings("checkstyle:MagicNumber")
   public void spawnArmorStand(Player viewer, Location loc, float yaw, long ttlTicks) {
-    LogData.get().info("[fakeentity] skipped armor_stand viewer="
-        + viewer.getName() + " loc=" + formatLoc(loc.getX(), loc.getY(), loc.getZ())
-        + " yaw=" + yaw + " ttl=" + ttlTicks);
+    int entityId = entityIdCounter.getAndDecrement();
+    UUID uuid = UUID.randomUUID();
+
+    com.github.retrooper.packetevents.protocol.world.Location packetLoc =
+        new com.github.retrooper.packetevents.protocol.world.Location(
+            loc.getX(), loc.getY(), loc.getZ(), yaw, 0f);
+
+    try {
+      WrapperPlayServerSpawnEntity spawn = new WrapperPlayServerSpawnEntity(
+          entityId, uuid, EntityTypes.ARMOR_STAND, packetLoc, (byte) yaw, (byte) 0,
+          new Vector3d(0, 0, 0));
+      PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, spawn);
+    } catch (Throwable error) {
+      LogData.get().warning("[fakeentity] failed to send armor stand spawn id="
+          + entityId + ": " + error);
+      return;
+    }
+
+    try {
+      List<EntityData<?>> data = new ArrayList<>(3);
+      data.add(new EntityData<>(0, EntityDataTypes.BYTE, (byte) 0x20));
+      data.add(new EntityData<>(5, EntityDataTypes.BYTE, (byte) 0x10));
+      data.add(new EntityData<>(6, EntityDataTypes.BYTE, (byte) 0x01));
+      WrapperPlayServerEntityMetadata meta =
+          new WrapperPlayServerEntityMetadata(entityId, data);
+      PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, meta);
+    } catch (Throwable error) {
+      LogData.get().warning("[fakeentity] failed to send armor stand metadata id="
+          + entityId + ": " + error);
+    }
+
+    scheduleDespawn(viewer, entityId, ttlTicks);
   }
 
   public void despawnAllFor(Player viewer) {
@@ -145,7 +176,7 @@ public final class FakeEntityManager {
     }
   }
 
-  private void trackAndSchedule(Player viewer, int entityId, long ttlTicks) {
+  private void scheduleDespawn(Player viewer, int entityId, long ttlTicks) {
     active.computeIfAbsent(viewer.getUniqueId(),
         k -> Collections.synchronizedList(new ArrayList<>())).add(entityId);
     Bukkit.getScheduler().runTaskLater(plugin,
@@ -165,19 +196,15 @@ public final class FakeEntityManager {
     }
   }
 
-  private static String formatLoc(double x, double y, double z) {
-    return String.format("%.3f,%.3f,%.3f", x, y, z);
-  }
-
   @SuppressWarnings("checkstyle:MagicNumber")
-  private static int mapFacingToSpawnData(int facing) {
+  private static int facingToSpawnData(int facing) {
     return switch (facing) {
-      case 0 -> 3; // south
-      case 1 -> 4; // west
-      case 2 -> 2; // north
-      case 3 -> 5; // east
-      case 4 -> 1; // up
-      case 5 -> 0; // down
+      case 0 -> 3;
+      case 1 -> 4;
+      case 2 -> 2;
+      case 3 -> 5;
+      case 4 -> 1;
+      case 5 -> 0;
       default -> 0;
     };
   }

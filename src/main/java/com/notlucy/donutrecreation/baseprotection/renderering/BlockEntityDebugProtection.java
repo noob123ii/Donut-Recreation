@@ -1,17 +1,19 @@
 package com.notlucy.donutrecreation.baseprotection.renderering;
 
+import java.lang.reflect.Field;
+import java.util.Arrays;
+import java.util.Set;
+
+import org.bukkit.Location;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.world.chunk.Column;
 import com.github.retrooper.packetevents.protocol.world.chunk.TileEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
-import java.lang.reflect.Field;
-import java.util.Arrays;
-import java.util.Set;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.World;
-import org.bukkit.entity.Player;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class BlockEntityDebugProtection {
@@ -105,30 +107,27 @@ public final class BlockEntityDebugProtection {
     WrapperPlayServerBlockEntityData wrapper = new WrapperPlayServerBlockEntityData(event);
     var pos = wrapper.getPosition();
     int by = pos.getY();
-    if (rm.tileMaskEnabled() && rm.shouldMaskTile(player, pos.getX(), by, pos.getZ())) {
-      event.setCancelled(true);
-      return;
-    }
-    if (by >= rm.hideBelowY()) {
-      return;
-    }
     int cx = pos.getX() >> 4;
     int cz = pos.getZ() >> 4;
-    if (!rm.isRevealed(player, cx, cz)) {
-      event.setCancelled(true);
-      return;
+
+    if (by < rm.hideBelowY()) {
+      if (!rm.isRevealed(player, cx, cz)) {
+        event.setCancelled(true);
+        return;
+      }
     }
+
     World world = player.getWorld();
     Material type = world.getBlockAt(pos.getX(), by, pos.getZ()).getType();
-    if (!RESTRICTED_TILES.contains(type)) {
-      return;
-    }
-    Location playerLoc = player.getLocation();
-    double dx = pos.getX() + 0.5 - playerLoc.getX();
-    double dy = by + 0.5 - playerLoc.getY();
-    double dz = pos.getZ() + 0.5 - playerLoc.getZ();
-    if (dx * dx + dy * dy + dz * dz > PROXIMITY_BLOCKS * PROXIMITY_BLOCKS) {
-      event.setCancelled(true);
+    if (RESTRICTED_TILES.contains(type)) {
+      Location playerLoc = player.getLocation();
+      double dx = pos.getX() + 0.5 - playerLoc.getX();
+      double dy = by + 0.5 - playerLoc.getY();
+      double dz = pos.getZ() + 0.5 - playerLoc.getZ();
+      double distSq = dx * dx + dy * dy + dz * dz;
+      if (distSq > PROXIMITY_BLOCKS * PROXIMITY_BLOCKS) {
+        event.setCancelled(true);
+      }
     }
   }
 

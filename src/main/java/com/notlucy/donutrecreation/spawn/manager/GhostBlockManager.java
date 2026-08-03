@@ -15,20 +15,9 @@ import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Tracks ephemeral, per-viewer ghost blocks and reverts them after a TTL.
- *
- * <p>A ghost block is a client-only visual change pushed via
- * {@link Player#sendBlockChange(Location, BlockData)}. The server-side block is unchanged.
- * On expiry — or on plugin disable / player quit — this manager re-sends the real block
- * data from the world to restore the client's view.
- */
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class GhostBlockManager {
 
-  /**
-   * One scheduled batch of ghost blocks bound to a single viewer.
-   */
   public static final class GhostGroup {
     public final UUID viewerId;
     public final List<Location> locations;
@@ -43,9 +32,6 @@ public final class GhostBlockManager {
     }
   }
 
-  /**
-   * A single ghost block at a fixed location with the desired client-side appearance.
-   */
   public static final class GhostBlock {
     public final Location location;
     public final BlockData data;
@@ -65,11 +51,19 @@ public final class GhostBlockManager {
     this.plugin = plugin;
   }
 
-  /**
-   * Sends the supplied ghost blocks to {@code viewer} and schedules them to be reverted
-   * after {@code ttlTicks}. Returns an opaque group id which can be passed to
-   * {@link #revert(long)} to revert early.
-   */
+  public long broadcast(List<GhostBlock> ghosts, long ttlTicks, int radius, Runnable onRevert) {
+    if (ghosts == null || ghosts.isEmpty()) return -1L;
+    Location center = ghosts.get(0).location;
+    long firstId = -1L;
+    for (Player viewer : Bukkit.getOnlinePlayers()) {
+      if (!viewer.getWorld().equals(center.getWorld())) continue;
+      if (viewer.getLocation().distanceSquared(center) > (double) radius * radius) continue;
+      long id = send(viewer, ghosts, ttlTicks, onRevert);
+      if (firstId == -1L) firstId = id;
+    }
+    return firstId;
+  }
+
   public long send(Player viewer, List<GhostBlock> ghosts, long ttlTicks, Runnable onRevert) {
     if (viewer == null || ghosts == null || ghosts.isEmpty()) {
       return -1L;
@@ -100,7 +94,6 @@ public final class GhostBlockManager {
     return id;
   }
 
-  /** Reverts a single group early. No-op if already reverted. */
   public void revert(long groupId) {
     GhostGroup group = groups.remove(groupId);
     if (group == null) {
@@ -130,14 +123,12 @@ public final class GhostBlockManager {
     }
   }
 
-  /** Reverts every active group. Used on plugin disable. */
   public void revertAll() {
     for (Long id : new ArrayList<>(groups.keySet())) {
       revert(id);
     }
   }
 
-  /** Reverts every group belonging to the given viewer. Used on quit. */
   public void revertAllFor(UUID viewerId) {
     for (Long id : new ArrayList<>(groups.keySet())) {
       GhostGroup group = groups.get(id);
@@ -147,7 +138,6 @@ public final class GhostBlockManager {
     }
   }
 
-  /** Marks a group so it reverts when its blocks are interacted with. */
   public void setRevertOnInteract(long groupId, boolean revertOnInteract) {
     GhostGroup group = groups.get(groupId);
     if (group != null) {
@@ -155,10 +145,6 @@ public final class GhostBlockManager {
     }
   }
 
-  /**
-   * If {@code player} has an active interactable ghost group that contains
-   * {@code clicked}, reverts that group and returns true.
-   */
   public boolean tryRevertOnInteract(Player player, Location clicked) {
     if (clicked == null) {
       return false;

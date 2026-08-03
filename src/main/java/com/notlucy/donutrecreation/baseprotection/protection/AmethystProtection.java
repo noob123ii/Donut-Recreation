@@ -1,5 +1,12 @@
 package com.notlucy.donutrecreation.baseprotection.protection;
 
+import java.util.BitSet;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+
 import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
 import com.github.retrooper.packetevents.protocol.world.chunk.LightData;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
@@ -10,10 +17,6 @@ import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.packet.BlockIdRegistry;
 import com.notlucy.donutrecreation.baseprotection.renderering.LightDebugProtection;
 import com.notlucy.donutrecreation.util.LogData;
-import java.util.BitSet;
-import java.util.HashSet;
-import java.util.Set;
-import org.bukkit.entity.Player;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class AmethystProtection {
@@ -67,7 +70,7 @@ public final class AmethystProtection {
       return false;
     }
 
-    int swapped = maskPositions(sections, positions, minSection, rm.hideBelowY());
+    int swapped = maskPositions(sections, positions, minSection, rm.hideBelowY(), player.getWorld());
     if (swapped <= 0) {
       return false;
     }
@@ -158,9 +161,9 @@ public final class AmethystProtection {
   private Set<Long> scanForAmethyst(
       BaseChunk[] sections, int cx, int cz,
       int minSection, int floorSection, BitSet litSections) {
-    Set<Long> hits = new HashSet<>();
-    // Amethyst geodes only generate up to ~Y=30; limit scan to 7 sections above floor
-    int maxScanSection = floorSection + 6;
+    Set<Long> allAmethyst = new HashSet<>();
+
+    int maxScanSection = floorSection + 10;
     for (int i = 0; i < sections.length; i++) {
       int sy = minSection + i;
       if (sy < floorSection || sy > maxScanSection) {
@@ -177,7 +180,7 @@ public final class AmethystProtection {
           for (int z = 0; z < 16; z++) {
             int blockId = s.getBlockId(x, y, z);
             if (ids.isAmethyst(blockId)) {
-              hits.add(RevealManager.packPos((cx << 4) + x, (sy << 4) + y, (cz << 4) + z));
+              allAmethyst.add(RevealManager.packPos((cx << 4) + x, (sy << 4) + y, (cz << 4) + z));
               any = true;
             }
           }
@@ -187,13 +190,57 @@ public final class AmethystProtection {
         litSections.set(i);
       }
     }
-    return hits;
+
+    Set<Long> clustered = new HashSet<>();
+    if (allAmethyst.size() < 200) {
+
+      return clustered;
+    }
+
+    for (long packed : allAmethyst) {
+      int ax = RevealManager.unpackX(packed);
+      int ay = RevealManager.unpackY(packed);
+      int az = RevealManager.unpackZ(packed);
+      int neighbors = 0;
+
+      for (int dx = -1; dx <= 1; dx++) {
+        for (int dy = -1; dy <= 1; dy++) {
+          for (int dz = -1; dz <= 1; dz++) {
+            if (dx == 0 && dy == 0 && dz == 0) continue;
+            long neighborPacked = RevealManager.packPos(ax + dx, ay + dy, az + dz);
+
+            if (allAmethyst.contains(neighborPacked)) {
+              neighbors++;
+            } else {
+
+              int neighborCx = (ax + dx) >> 4;
+              int neighborCz = (az + dz) >> 4;
+              if (neighborCx != cx || neighborCz != cz) {
+                Set<Long> neighborChunkPos = rm.geodePositions(RevealManager.chunkKey(neighborCx, neighborCz));
+                if (neighborChunkPos != null && neighborChunkPos.contains(neighborPacked)) {
+                  neighbors++;
+                }
+              }
+            }
+          }
+        }
+      }
+
+      if (neighbors >= 10) {
+        clustered.add(packed);
+      }
+    }
+
+    return clustered;
   }
 
-  private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection, int floorY) {
+  private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection, int floorY, World world) {
     int swapped = 0;
     for (long packed : positions) {
+      int wx = RevealManager.unpackX(packed);
       int wy = RevealManager.unpackY(packed);
+      int wz = RevealManager.unpackZ(packed);
+
       int idx = (wy >> 4) - minSection;
       if (idx < 0 || idx >= sections.length) {
         continue;
@@ -202,9 +249,9 @@ public final class AmethystProtection {
       if (s == null) {
         continue;
       }
-      int lx = RevealManager.unpackX(packed) & 0xF;
+      int lx = wx & 0xF;
       int ly = wy & 0xF;
-      int lz = RevealManager.unpackZ(packed) & 0xF;
+      int lz = wz & 0xF;
       if (!ids.isAmethyst(s.getBlockId(lx, ly, lz))) {
         continue;
       }

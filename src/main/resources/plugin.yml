@@ -5,9 +5,10 @@ api-version: "1.21"
 author: Notlucy
 description: Donut-style anti-freecam and /sus recreation plugin
 commands:
-  sus:
-    description: Open the sus GUI / mark a player suspicious (OP only)
-    usage: "/sus [player] [reason]"
+  acsus:
+    description: Open the Anti Cheat Sus GUI / mark a player suspicious
+    usage: "/acsus [player] [reason]"
+    aliases: [acsus]
   offend:
     description: Punish a player using a configured reason (OP only)
     usage: "/offend <player> <reason>"
@@ -17,13 +18,14 @@ commands:
     usage: "/unban <player>"
   donut:
     description: Main plugin command (OP only)
-    usage: "/donut reload"
-  spawn:
+    usage: "/donut reload | /donut chunk generate <border>"
+  spawnfake:
     description: Spawn ephemeral decoy ghost-blocks / NPCs (OP only)
-    usage: "/spawn <fakestash|fakespawner|fakeplayer|fakebedrockspawner>"
-  settings:
-    description: Open the settings GUI
-    usage: "/settings"
+    usage: "/spawnfake <stash|spawner|player|bedrockspawner>"
+  staffmode:
+    description: Toggle staff mode (restricts non-whitelisted commands)
+    usage: "/staffmode"
+
 permissions:
   donutrecreation.alerts:
     description: Receives anti-freecam and sus alerts

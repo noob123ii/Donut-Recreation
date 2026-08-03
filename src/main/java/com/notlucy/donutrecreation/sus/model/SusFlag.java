@@ -9,5 +9,10 @@ public record SusFlag(
     String targetName,
     String reason,
     int count,
-    Instant lastFlagged) {
+    Instant lastFlagged,
+    String category) {
+
+  public SusFlag(UUID targetId, String targetName, String reason, int count, Instant lastFlagged) {
+    this(targetId, targetName, reason, count, lastFlagged, "custom");
+  }
 }

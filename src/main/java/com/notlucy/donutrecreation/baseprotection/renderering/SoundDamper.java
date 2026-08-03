@@ -121,8 +121,7 @@ public final class SoundDamper {
   private Entity resolveEntity(Player viewer, int entityId) {
     World world = viewer.getWorld();
     long now = Bukkit.getCurrentTick();
-    // This runs on PacketEvents' Netty IO threads (multiple), so the shared index must be
-    // guarded; an unsynchronised HashMap can corrupt or spin during concurrent resize.
+
     synchronized (indexLock) {
       if (now != indexTick) {
         entityIndex.clear();

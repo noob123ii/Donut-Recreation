@@ -1,7 +1,6 @@
 package com.notlucy.donutrecreation.sus.model;
 
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,27 +13,39 @@ public class SusFlagManager {
   private final Map<UUID, SusFlag> flags = new LinkedHashMap<>();
 
   public void flag(Player target, String reason) {
-    flag(target.getUniqueId(), target.getName(), reason);
+    flag(target.getUniqueId(), target.getName(), reason, "custom");
+  }
+
+  public void flag(Player target, String reason, String category) {
+    flag(target.getUniqueId(), target.getName(), reason, category);
   }
 
   public synchronized void flag(UUID uuid, String name, String reason) {
-    SusFlag current = flags.get(uuid);
-    int count = current == null ? 1 : current.count() + 1;
-    flags.put(uuid, new SusFlag(uuid, name, reason, count, Instant.now()));
+    flag(uuid, name, reason, "custom");
+  }
+
+  public synchronized void flag(UUID uuid, String name, String reason, String category) {
+    SusFlag last = flags.get(uuid);
+    int count = last == null ? 1 : last.count() + 1;
+    String cat = (category != null) ? category : "custom";
+    flags.put(uuid, new SusFlag(uuid, name, reason, count, Instant.now(), cat));
   }
 
   public synchronized void clear(UUID targetId) {
     flags.remove(targetId);
   }
 
-  public synchronized List<SusFlag> queuedFlags() {
+  public synchronized List<SusFlag> queuedFlags(String category) {
     return flags.values().stream()
+        .filter(f -> category == null || category.equals(f.category()))
         .sorted(Comparator.comparing(SusFlag::lastFlagged).reversed())
         .limit(45)
         .toList();
   }
 
-  public synchronized List<SusFlag> allFlags() {
-    return new ArrayList<>(flags.values());
+  public synchronized int countByCategory(String category) {
+    return (int) flags.values().stream()
+        .filter(f -> category.equals(f.category()))
+        .count();
   }
 }

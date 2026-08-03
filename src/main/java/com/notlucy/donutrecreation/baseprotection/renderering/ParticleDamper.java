@@ -6,14 +6,6 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPa
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import org.bukkit.entity.Player;
 
-/**
- * Suppresses particle packets that originate at positions which the viewer must not
- * be able to see — i.e. coordinates below the hide floor in chunks that are not
- * revealed for them. This plugs a leak vector that {@link SoundDamper} only covers
- * for sound packets: dispenser smoke, redstone, block-break, sculk, ash, etc. all
- * spawn server-side and would otherwise tell the viewer "someone is mining at
- * y=-50 in this chunk" even though the floor is supposedly hiding the base.
- */
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class ParticleDamper {
 

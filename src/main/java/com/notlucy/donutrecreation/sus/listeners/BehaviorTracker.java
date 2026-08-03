@@ -17,24 +17,18 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 
-/**
- * Watches "soft" behaviour signals and pushes them to the sus flag manager so they show up
- * in {@code /sus}. These are heuristics, not bans — they catch base-finding-style behaviour
- * (long elytra flights, sustained mining bursts) and macro-like repetition patterns.
- */
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public class BehaviorTracker implements Listener {
 
-  private static final long ELYTRA_FLAG_MS = 5L * 60L * 1000L;
+  private static final long ELYTRA_MS = 5L * 60L * 1000L;
   private static final long MINE_WINDOW_MS = 30_000L;
-  private static final int MINE_BURST_COUNT = 200;
-  private static final int MACRO_REPEAT_THRESHOLD = 100;
+  private static final int MINE_BURST = 200;
+  private static final int REPEAT_LIMIT = 100;
   private static final long MACRO_WINDOW_MS = 60_000L;
-  private static final long REFLAG_COOLDOWN_MS = 60_000L;
+  private static final long RE_COOLDOWN_MS = 60_000L;
 
   private final DonutRecreation plugin;
-  private final Map<UUID, BehaviorState> states = new HashMap<>();
-  private final Map<UUID, Long> lastGlideCheck = new HashMap<>();
+  private final Map<UUID, State> states = new HashMap<>();
 
   @SuppressFBWarnings(
       value = "EI_EXPOSE_REP2",
@@ -50,11 +44,11 @@ public class BehaviorTracker implements Listener {
   private void tick() {
     long now = System.currentTimeMillis();
     for (Player player : Bukkit.getOnlinePlayers()) {
-      BehaviorState state = states.computeIfAbsent(player.getUniqueId(), id -> new BehaviorState());
+      State state = states.computeIfAbsent(player.getUniqueId(), id -> new State());
       if (player.isGliding()) {
         state.elytraMs += 1000L;
-        if (state.elytraMs >= ELYTRA_FLAG_MS && cooldownReady(state.lastElytraFlag, now)) {
-          state.lastElytraFlag = now;
+        if (state.elytraMs >= ELYTRA_MS && cooldownReady(state.elytraAt, now)) {
+          state.elytraAt = now;
           plugin.susFlagManager().flag(player,
               "Elytra flight: " + (state.elytraMs / 60000L) + "m sustained");
           state.elytraMs = 0;
@@ -66,66 +60,64 @@ public class BehaviorTracker implements Listener {
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBreak(BlockBreakEvent event) {
     Player player = event.getPlayer();
-    BehaviorState state = states.computeIfAbsent(player.getUniqueId(), id -> new BehaviorState());
+    State state = states.computeIfAbsent(player.getUniqueId(), id -> new State());
     long now = System.currentTimeMillis();
-    state.miningTimes.add(now);
-    while (!state.miningTimes.isEmpty() && now - state.miningTimes.peekFirst() > MINE_WINDOW_MS) {
-      state.miningTimes.pollFirst();
+    state.mines.add(now);
+    while (!state.mines.isEmpty() && now - state.mines.peekFirst() > MINE_WINDOW_MS) {
+      state.mines.pollFirst();
     }
-    if (state.miningTimes.size() >= MINE_BURST_COUNT
-        && cooldownReady(state.lastMineFlag, now)) {
-      state.lastMineFlag = now;
+    if (state.mines.size() >= MINE_BURST && cooldownReady(state.mineAt, now)) {
+      state.mineAt = now;
       plugin.susFlagManager().flag(player,
-          "Sustained mining: " + state.miningTimes.size() + " blocks in "
+          "Sustained mining: " + state.mines.size() + " blocks in "
               + (MINE_WINDOW_MS / 1000) + "s (possible base-finding)");
     }
     Material mat = event.getBlock().getType();
-    countAction(state, "break:" + mat.name(), now, player, "Macroing (break " + mat.name() + ")");
+    track(state, "break:" + mat.name(), now, player, "Macroing (break " + mat.name() + ")");
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onInteract(PlayerInteractEvent event) {
     if (event.getAction().toString().startsWith("RIGHT_CLICK")) {
       Player player = event.getPlayer();
-      BehaviorState state =
-          states.computeIfAbsent(player.getUniqueId(), id -> new BehaviorState());
+      State state =
+          states.computeIfAbsent(player.getUniqueId(), id -> new State());
       long now = System.currentTimeMillis();
       Material hand = player.getInventory().getItemInMainHand().getType();
-      countAction(state, "use:" + hand.name(), now, player, "Macroing (use " + hand.name() + ")");
+      track(state, "use:" + hand.name(), now, player, "Macroing (use " + hand.name() + ")");
     }
   }
 
   @EventHandler
   public void onQuit(PlayerQuitEvent event) {
     states.remove(event.getPlayer().getUniqueId());
-    lastGlideCheck.remove(event.getPlayer().getUniqueId());
   }
 
-  private void countAction(
-      BehaviorState state, String key, long now, Player player, String flagMessage) {
-    Deque<Long> deque = state.actionWindows.computeIfAbsent(key, k -> new ArrayDeque<>());
-    deque.add(now);
-    while (!deque.isEmpty() && now - deque.peekFirst() > MACRO_WINDOW_MS) {
-      deque.pollFirst();
+  private void track(
+      State state, String key, long now, Player player, String msg) {
+    Deque<Long> q = state.windows.computeIfAbsent(key, k -> new ArrayDeque<>());
+    q.add(now);
+    while (!q.isEmpty() && now - q.peekFirst() > MACRO_WINDOW_MS) {
+      q.pollFirst();
     }
-    Long last = state.lastMacroFlag.get(key);
-    if (deque.size() >= MACRO_REPEAT_THRESHOLD
-        && (last == null || now - last >= REFLAG_COOLDOWN_MS)) {
-      state.lastMacroFlag.put(key, now);
-      plugin.susFlagManager().flag(player, flagMessage + " x" + deque.size());
+    Long last = state.macroAt.get(key);
+    if (q.size() >= REPEAT_LIMIT
+        && (last == null || now - last >= RE_COOLDOWN_MS)) {
+      state.macroAt.put(key, now);
+      plugin.susFlagManager().flag(player, msg + " x" + q.size());
     }
   }
 
   private static boolean cooldownReady(long last, long now) {
-    return last == 0 || now - last >= REFLAG_COOLDOWN_MS;
+    return last == 0 || now - last >= RE_COOLDOWN_MS;
   }
 
-  private static class BehaviorState {
+  private static class State {
     long elytraMs;
-    long lastElytraFlag;
-    long lastMineFlag;
-    final Deque<Long> miningTimes = new ArrayDeque<>();
-    final Map<String, Deque<Long>> actionWindows = new HashMap<>();
-    final Map<String, Long> lastMacroFlag = new HashMap<>();
+    long elytraAt;
+    long mineAt;
+    final Deque<Long> mines = new ArrayDeque<>();
+    final Map<String, Deque<Long>> windows = new HashMap<>();
+    final Map<String, Long> macroAt = new HashMap<>();
   }
 }

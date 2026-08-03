@@ -11,14 +11,15 @@ public final class LightDebugProtection {
   private LightDebugProtection() {
   }
 
-  /**
-   * Zeroes the light arrays and updates masks for every section that is at or
-   * below the floor. This prevents cheat clients from using light level anomalies
-   * to detect hidden chunks.
-   */
+  private static final byte FAKE_LIGHT_LEVEL = 5;
+
   public static void stripFloorLight(
       WrapperPlayServerChunkData wrapper, int minSection, int floorSection) {
     LightData light = wrapper.getLightData();
+    stripFloorLight(light, minSection, floorSection);
+  }
+
+  public static void stripFloorLight(LightData light, int minSection, int floorSection) {
     if (light == null) {
       return;
     }
@@ -32,17 +33,12 @@ public final class LightDebugProtection {
 
     for (int i = 0; i < span; i++) {
       int slot = i + 1;
-      safeZeroSlot(block, slot);
-      safeZeroSlot(sky, slot);
+      safeFillSlot(block, slot, FAKE_LIGHT_LEVEL);
+      safeFillSlot(sky, slot, FAKE_LIGHT_LEVEL);
     }
     clearLightMasks(light, span);
   }
 
-  /**
-   * Zeroes the light arrays and updates masks for the sections indicated by
-   * {@code sections}. This prevents cheat clients from using light level
-   * anomalies to detect hidden chunks.
-   */
   public static void stripLightForSections(LightData light, BitSet sections) {
     if (light == null) {
       return;
@@ -52,8 +48,8 @@ public final class LightDebugProtection {
 
     for (int i = sections.nextSetBit(0); i >= 0; i = sections.nextSetBit(i + 1)) {
       int slot = i + 1;
-      safeZeroSlot(block, slot);
-      safeZeroSlot(sky, slot);
+      safeFillSlot(block, slot, FAKE_LIGHT_LEVEL);
+      safeFillSlot(sky, slot, FAKE_LIGHT_LEVEL);
     }
     clearLightMasks(light, sections);
   }
@@ -119,9 +115,9 @@ public final class LightDebugProtection {
     }
   }
 
-  private static void safeZeroSlot(byte[][] data, int slot) {
+  private static void safeFillSlot(byte[][] data, int slot, int level) {
     if (data != null && slot >= 0 && slot < data.length && data[slot] != null) {
-      Arrays.fill(data[slot], (byte) 0);
+      Arrays.fill(data[slot], (byte) (level & 0xFF));
     }
   }
 

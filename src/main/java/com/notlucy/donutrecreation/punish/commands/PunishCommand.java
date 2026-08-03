@@ -23,20 +23,6 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
-/**
- * {@code /offend <player> <reason>} (alias {@code /punish}) — applies a configurable ban
- * with an optional data wipe and persists the ban into {@code playerdata.db}.
- *
- * <p>Reasons live under {@code punishments:} in {@code config.yml}, e.g.
- * <pre>
- * punishments:
- *   Krypton:
- *     BanTime: lifetime
- *     ResetData: true
- * </pre>
- *
- * <p>Only operators may run this command.
- */
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public class PunishCommand implements CommandExecutor, TabCompleter {
 
@@ -53,95 +39,95 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
 
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    if (!sender.isOp()) {
+    if (!sender.hasPermission("donutrecreation.*")) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
 
     if (args.length < 2) {
       sender.sendMessage(plugin.color("&cUsage: /offend <player> <reason>"));
-      sender.sendMessage(plugin.color("&7Reasons: &f" + String.join(", ", reasonKeys())));
+      sender.sendMessage(plugin.color("&7Reasons: &f" + String.join(", ", keys())));
       return true;
     }
 
     String targetName = args[0];
     String reasonInput = String.join(" ", Arrays.copyOfRange(args, 1, args.length));
-    String reasonKey = matchReasonKey(reasonInput);
-    if (reasonKey == null) {
+    String key = matchKey(reasonInput);
+    if (key == null) {
       sender.sendMessage(plugin.color("&cUnknown reason &f" + reasonInput
-          + "&c. Valid: &f" + String.join(", ", reasonKeys())));
+          + "&c. Valid: &f" + String.join(", ", keys())));
       return true;
     }
 
     ConfigurationSection section = plugin.getConfig()
-        .getConfigurationSection("punishments." + reasonKey);
+        .getConfigurationSection("punishments." + key);
     if (section == null) {
-      sender.sendMessage(plugin.color("&cReason &f" + reasonKey + " &cis not configured."));
+      sender.sendMessage(plugin.color("&cReason &f" + key + " &cis not configured."));
       return true;
     }
 
     String banTime = section.getString("BanTime", "lifetime");
     boolean resetData = section.getBoolean("ResetData", false);
-    Date expiry = parseExpiry(banTime);
+    Date expiry = parseTime(banTime);
 
-    OfflinePlayer offline = Bukkit.getOfflinePlayer(targetName);
-    String banMessage = "Punished: " + reasonKey + " (" + banTime + ")";
-    final String displayName = offline.getName() != null ? offline.getName() : targetName;
+    OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
+    String banMsg = "Punished: " + key + " (" + banTime + ")";
+    final String displayName = target.getName() != null ? target.getName() : targetName;
 
     Instant expiryInstant = expiry == null ? null : expiry.toInstant();
     PlayerProfile profile = Bukkit.createProfile(
-        offline.getUniqueId(),
-        offline.getName() != null ? offline.getName() : targetName);
+        target.getUniqueId(),
+        target.getName() != null ? target.getName() : targetName);
     @SuppressWarnings("deprecation")
     BanList<PlayerProfile> banList = Bukkit.getBanList(BanList.Type.PROFILE);
-    banList.addBan(profile, banMessage, expiryInstant, sender.getName());
+    banList.addBan(profile, banMsg, expiryInstant, sender.getName());
 
-    Player onlineTarget = offline.isOnline() ? offline.getPlayer() : null;
-    String capturedIp = null;
-    if (onlineTarget != null) {
-      var address = onlineTarget.getAddress();
+    Player online = target.isOnline() ? target.getPlayer() : null;
+    String ip = null;
+    if (online != null) {
+      var address = online.getAddress();
       if (address != null && address.getAddress() != null) {
-        capturedIp = address.getAddress().getHostAddress();
+        ip = address.getAddress().getHostAddress();
       }
       if (resetData) {
-        wipePlayerData(onlineTarget);
+        wipe(online);
       }
-      onlineTarget.kickPlayer(plugin.color("&c" + banMessage));
-    } else if (resetData && offline.hasPlayedBefore()) {
+      online.kickPlayer(plugin.color("&c" + banMsg));
+    } else if (resetData && target.hasPlayedBefore()) {
       sender.sendMessage(plugin.color(
           "&7Player is offline; data wipe will only run if they rejoin briefly."));
     }
-    if (capturedIp == null && store != null) {
-      capturedIp = store.lastIpFor(offline.getUniqueId());
+    if (ip == null && store != null) {
+      ip = store.lastIpFor(target.getUniqueId());
     }
     if (store != null) {
       long expiresAt = expiry == null ? -1L : expiry.getTime();
       store.recordBan(new PlayerDataStore.BanRecord(
-          offline.getUniqueId(),
+          target.getUniqueId(),
           displayName,
-          capturedIp,
-          reasonKey,
+          ip,
+          key,
           banTime,
           expiresAt,
           false));
     }
 
-    plugin.susFlagManager().clear(offline.getUniqueId());
+    plugin.susFlagManager().clear(target.getUniqueId());
 
     Bukkit.getOnlinePlayers().stream()
-        .filter(CommandSender::isOp)
+        .filter(p -> p.hasPermission("donutrecreation.*"))
         .forEach(op -> op.sendMessage(plugin.color(
             "&c[&4PUNISH&c] &f" + sender.getName() + " &7punished &f" + displayName
-                + " &7for &f" + reasonKey + " &7(&f" + banTime + "&7"
+                + " &7for &f" + key + " &7(&f" + banTime + "&7"
                 + (resetData ? "&7, &cdata wiped" : "") + "&7)")));
-    sender.sendMessage(plugin.color("&aPunished &f" + displayName + " &afor &f" + reasonKey));
+    sender.sendMessage(plugin.color("&aPunished &f" + displayName + " &afor &f" + key));
     return true;
   }
 
   @Override
   public List<String> onTabComplete(
       CommandSender sender, Command command, String alias, String[] args) {
-    if (!sender.isOp()) {
+    if (!sender.hasPermission("donutrecreation.*")) {
       return Collections.emptyList();
     }
     if (args.length == 1) {
@@ -157,9 +143,9 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     if (args.length == 2) {
       List<String> matches = new ArrayList<>();
       String lower = args[1].toLowerCase(Locale.ROOT);
-      for (String key : reasonKeys()) {
-        if (key.toLowerCase(Locale.ROOT).startsWith(lower)) {
-          matches.add(key);
+      for (String reason : keys()) {
+        if (reason.toLowerCase(Locale.ROOT).startsWith(lower)) {
+          matches.add(reason);
         }
       }
       return matches;
@@ -167,7 +153,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     return Collections.emptyList();
   }
 
-  private List<String> reasonKeys() {
+  private List<String> keys() {
     ConfigurationSection root = plugin.getConfig().getConfigurationSection("punishments");
     if (root == null) {
       return Collections.emptyList();
@@ -175,27 +161,23 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     return new ArrayList<>(root.getKeys(false));
   }
 
-  private String matchReasonKey(String input) {
+  private String matchKey(String input) {
     String lower = input.toLowerCase(Locale.ROOT).trim();
-    for (String key : reasonKeys()) {
-      if (key.equalsIgnoreCase(lower)) {
-        return key;
+    for (String reason : keys()) {
+      if (reason.equalsIgnoreCase(lower)) {
+        return reason;
       }
     }
     String normalized = lower.replaceAll("[^a-z0-9]", "");
-    for (String key : reasonKeys()) {
-      if (key.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "").equals(normalized)) {
-        return key;
+    for (String reason : keys()) {
+      if (reason.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "").equals(normalized)) {
+        return reason;
       }
     }
     return null;
   }
 
-  /**
-   * Parses durations like {@code lifetime}, {@code 1h}, {@code 30m}, {@code 7d}, {@code 2w},
-   * {@code 1mo}, {@code 1y}. Returns {@code null} for permanent bans.
-   */
-  private Date parseExpiry(String spec) {
+  private Date parseTime(String spec) {
     if (spec == null) {
       return null;
     }
@@ -229,7 +211,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
         i++;
       }
       String unit = text.substring(unitStart, i);
-      long ms = unitToMs(unit, value);
+      long ms = unitMs(unit, value);
       if (ms < 0) {
         return null;
       }
@@ -241,7 +223,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     return total == 0 ? null : new long[]{total};
   }
 
-  private long unitToMs(String unit, long value) {
+  private long unitMs(String unit, long value) {
     return switch (unit) {
       case "s", "sec", "secs", "second", "seconds" -> value * 1000L;
       case "m", "min", "mins", "minute", "minutes" -> value * 60_000L;
@@ -254,7 +236,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     };
   }
 
-  private void wipePlayerData(Player target) {
+  private void wipe(Player target) {
     target.getInventory().clear();
     target.getInventory().setArmorContents(new ItemStack[4]);
     target.getEnderChest().clear();

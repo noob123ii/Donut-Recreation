@@ -1,6 +1,5 @@
 package com.notlucy.donutrecreation.spawn.manager;
 
-import com.notlucy.donutrecreation.util.LogData;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -14,6 +13,7 @@ import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
+
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -21,6 +21,8 @@ import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
+
+import com.notlucy.donutrecreation.util.LogData;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class StashManager {
@@ -51,6 +53,27 @@ public final class StashManager {
       return null;
     }
     return templates.get(ThreadLocalRandom.current().nextInt(templates.size()));
+  }
+
+  public StashTemplate getByName(String name) {
+    if (name == null || templates.isEmpty()) {
+      return null;
+    }
+    String lowerName = name.toLowerCase(Locale.ROOT);
+    for (StashTemplate t : templates) {
+      if (t.name.toLowerCase(Locale.ROOT).equals(lowerName)) {
+        return t;
+      }
+    }
+    return null;
+  }
+
+  public List<String> getTemplateNames() {
+    List<String> names = new ArrayList<>(templates.size());
+    for (StashTemplate t : templates) {
+      names.add(t.name);
+    }
+    return names;
   }
 
   private void loadAll() {
@@ -169,7 +192,7 @@ public final class StashManager {
 
   private StashTemplate loadYaml(File file) {
     YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
-    String name = yaml.getString("name", file.getName().replace(".yml", ""));
+    String name = extractTemplateName(file);
     List<StashBlock> blocks = new ArrayList<>();
     ConfigurationSection blocksSection = yaml.getConfigurationSection("blocks");
     if (blocksSection != null) {
@@ -225,6 +248,28 @@ public final class StashManager {
       }
     }
     return new StashTemplate(name, blocks, entities);
+  }
+
+  private String extractTemplateName(File file) {
+    File parentDir = file.getParentFile();
+    if (parentDir == null) {
+      return file.getName().replace(".yml", "");
+    }
+    String parentName = parentDir.getName();
+    if ("converted".equalsIgnoreCase(parentName)) {
+      File grandParent = parentDir.getParentFile();
+      if (grandParent != null) {
+        String grandParentName = grandParent.getName();
+        if ("Stashs".equalsIgnoreCase(grandParentName)) {
+          return file.getName().replace(".yml", "");
+        }
+        return grandParentName;
+      }
+    }
+    if ("Stashs".equalsIgnoreCase(parentName)) {
+      return file.getName().replace(".yml", "");
+    }
+    return parentName;
   }
 
   private void writeDefaultTemplates() {

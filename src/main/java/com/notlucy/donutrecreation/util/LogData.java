@@ -54,7 +54,6 @@ public final class LogData {
   public void reload(Plugin plugin) {
     this.enabled = plugin.getConfig().getBoolean("logging.enabled", true);
     this.fineEnabled = plugin.getConfig().getBoolean("logging.fine", false);
-    logger.setLevel(fineEnabled ? Level.FINE : Level.INFO);
   }
 
   private boolean shouldLog(LogType type) {

@@ -10,30 +10,17 @@ import java.util.Locale;
 import java.util.UUID;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
-import org.bukkit.command.CommandSender;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 
-/**
- * Detects ban-evasion attempts.
- *
- * <p>Policy is configurable via {@code alt-ban-policy} in {@code config.yml}:
- * <ul>
- *   <li>{@code strict} — any shared IP triggers an immediate 1-month ban.</li>
- *   <li>{@code new-accounts-only} — bans only if the alt has never joined this IP before
- *       OR the account is younger than {@code alt-ban-account-min-age-hours}. Otherwise
- *       the alt is sus-flagged and staff is notified. This is the default.</li>
- *   <li>{@code flag-only} — never auto-bans; always sus-flags + notifies staff.</li>
- * </ul>
- */
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class AltBanListener implements Listener {
 
-  private static final long ONE_MONTH_MS = 30L * 24L * 60L * 60L * 1000L;
-  private static final long ONE_HOUR_MS = 60L * 60L * 1000L;
+  private static final long MONTH_MS = 30L * 24L * 60L * 60L * 1000L;
+  private static final long HOUR_MS = 60L * 60L * 1000L;
   private static final String EVADE_REASON = "Possible Ban Evading";
 
   private final DonutRecreation plugin;
@@ -60,23 +47,23 @@ public final class AltBanListener implements Listener {
       return;
     }
 
-    PlayerDataStore.BanRecord ownBan = store.activeBanFor(event.getUniqueId());
-    if (ownBan != null) {
-      String expires = ownBan.expiresAt < 0
+    PlayerDataStore.BanRecord ban = store.activeBanFor(event.getUniqueId());
+    if (ban != null) {
+      String expires = ban.expiresAt < 0
           ? "&cNever"
-          : "&f" + Instant.ofEpochMilli(ownBan.expiresAt);
+          : "&f" + Instant.ofEpochMilli(ban.expiresAt);
       String msg = plugin.color(
           "&c&lYOU ARE BANNED\n\n"
-              + "&7Reason: &f" + ownBan.reason + "\n"
-              + "&7Duration: &f" + ownBan.banTime + "\n"
+              + "&7Reason: &f" + ban.reason + "\n"
+              + "&7Duration: &f" + ban.banTime + "\n"
               + "&7Expires: " + expires + "\n\n"
               + "&7Appeal at &9discord.gg/example");
       event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, msg);
       return;
     }
 
-    PlayerDataStore.BanRecord shared = store.activeBanSharingIp(ip, event.getUniqueId());
-    if (shared == null) {
+    PlayerDataStore.BanRecord other = store.activeBanSharingIp(ip, event.getUniqueId());
+    if (other == null) {
       return;
     }
 
@@ -88,15 +75,15 @@ public final class AltBanListener implements Listener {
     boolean shouldBan = switch (policy) {
       case "strict" -> true;
       case "flag-only" -> false;
-      default -> isLikelyEvader(event, ip);
+      default -> isEvading(event, ip);
     };
 
     if (!shouldBan) {
-      flagAndNotify(event.getUniqueId(), event.getName(), shared);
+      flag(event.getUniqueId(), event.getName(), other);
       return;
     }
 
-    long expiresAt = System.currentTimeMillis() + ONE_MONTH_MS;
+    long expiresAt = System.currentTimeMillis() + MONTH_MS;
     PlayerDataStore.BanRecord evader = new PlayerDataStore.BanRecord(
         event.getUniqueId(),
         event.getName(),
@@ -115,42 +102,42 @@ public final class AltBanListener implements Listener {
     } catch (Throwable ignored) {
     }
 
-    String evadeMsg = plugin.color(
+    String msg = plugin.color(
         "&c&lBAN EVASION DETECTED\n\n"
             + "&7Reason: &f" + EVADE_REASON + "\n"
             + "&7Duration: &f1 month\n"
-            + "&7Linked to: &f" + (shared.name == null ? shared.uuid.toString() : shared.name));
-    event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, evadeMsg);
+            + "&7Linked to: &f" + (other.name == null ? other.uuid.toString() : other.name));
+    event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, msg);
   }
 
-  private boolean isLikelyEvader(AsyncPlayerPreLoginEvent event, String ip) {
+  private boolean isEvading(AsyncPlayerPreLoginEvent event, String ip) {
     PlayerDataStore.Profile profile = store.profileOf(event.getUniqueId());
     if (profile == null) {
       return false;
     }
-    long minAgeHours = Math.max(0L,
+    long minAge = Math.max(0L,
         plugin.getConfig().getLong("alt-ban-account-min-age-hours", 168L));
-    long ageMs = System.currentTimeMillis() - profile.firstSeenAt;
-    if (ageMs < minAgeHours * ONE_HOUR_MS) {
+    long age = System.currentTimeMillis() - profile.firstSeenAt;
+    if (age < minAge * HOUR_MS) {
       return true;
     }
-    boolean knownAtThisIp;
+    boolean known;
     synchronized (profile.recentIps) {
-      knownAtThisIp = profile.recentIps.contains(ip);
+      known = profile.recentIps.contains(ip);
     }
-    return !knownAtThisIp;
+    return !known;
   }
 
-  private void flagAndNotify(UUID uuid, String name, PlayerDataStore.BanRecord shared) {
+  private void flag(UUID uuid, String name, PlayerDataStore.BanRecord other) {
     try {
-      String linked = shared.name == null ? shared.uuid.toString() : shared.name;
+      String linked = other.name == null ? other.uuid.toString() : other.name;
       plugin.susFlagManager().flag(uuid, name,
-          "Shares IP with banned " + linked + " (" + shared.reason + ")");
+          "Shares IP with banned " + linked + " (" + other.reason + ")");
       Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getOnlinePlayers().stream()
-          .filter(CommandSender::isOp)
+          .filter(p -> p.hasPermission("donutrecreation.*"))
           .forEach(op -> op.sendMessage(plugin.color(
               "&e[&6ALT&e] &f" + name + " &7shares IP with banned &f" + linked
-                  + " &7(&f" + shared.reason + "&7) — flagged, not auto-banned."))));
+                  + " &7(&f" + other.reason + "&7) — flagged, not auto-banned."))));
     } catch (Throwable ignored) {
     }
   }

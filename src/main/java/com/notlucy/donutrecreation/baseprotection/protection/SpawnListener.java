@@ -1,8 +1,8 @@
-package com.notlucy.donutrecreation.baseprotection;
+package com.notlucy.donutrecreation.baseprotection.protection;
 
-import com.notlucy.donutrecreation.util.LogData;
 import java.util.EnumSet;
 import java.util.Set;
+
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
@@ -19,7 +19,11 @@ import org.bukkit.event.block.BlockSpreadEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent;
 import org.bukkit.event.entity.CreatureSpawnEvent.SpawnReason;
 import org.bukkit.event.entity.EntityExplodeEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.world.ChunkUnloadEvent;
+
+import com.notlucy.donutrecreation.baseprotection.RevealManager;
+import com.notlucy.donutrecreation.util.LogData;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public class SpawnListener implements Listener {
@@ -65,17 +69,16 @@ public class SpawnListener implements Listener {
       return;
     }
     event.setCancelled(true);
-    if (rm.verboseLogging()) {
-      var loc = entity.getLocation();
-      LogData.get().info("[hider] cancelled " + entity.getType()
-          + " @ " + loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ()
-          + " (" + reason + ")");
-    }
+  }
+
+  @EventHandler(priority = EventPriority.MONITOR)
+  public void onChunkLoad(ChunkLoadEvent event) {
+
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onChunkUnload(ChunkUnloadEvent event) {
-    rm.onChunkUnload(event.getChunk().getX(), event.getChunk().getZ());
+    rm.onChunkUnload(event.getChunk());
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -125,6 +128,7 @@ public class SpawnListener implements Listener {
         rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
       }
     }
+
   }
 
   private void syncOne(Block before, BlockState after) {

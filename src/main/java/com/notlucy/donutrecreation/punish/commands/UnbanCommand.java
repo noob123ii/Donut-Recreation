@@ -29,7 +29,7 @@ public class UnbanCommand implements CommandExecutor, TabCompleter {
 
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    if (!sender.isOp()) {
+    if (!sender.hasPermission("donutrecreation.*")) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
@@ -37,37 +37,37 @@ public class UnbanCommand implements CommandExecutor, TabCompleter {
       sender.sendMessage(plugin.color("&cUsage: /unban <player>"));
       return true;
     }
-    String targetName = args[0];
-    OfflinePlayer offline = Bukkit.getOfflinePlayer(targetName);
-    String name = offline.getName() != null ? offline.getName() : targetName;
+    String name = args[0];
+    OfflinePlayer target = Bukkit.getOfflinePlayer(name);
+    String display = target.getName() != null ? target.getName() : name;
 
     if (store != null) {
-      store.removeBan(offline.getUniqueId());
+      store.removeBan(target.getUniqueId());
     }
 
     try {
-      PlayerProfile profile = Bukkit.createProfile(offline.getUniqueId(), name);
+      PlayerProfile profile = Bukkit.createProfile(target.getUniqueId(), display);
       @SuppressWarnings("deprecation")
       BanList<PlayerProfile> banList = Bukkit.getBanList(BanList.Type.PROFILE);
       banList.pardon(profile);
     } catch (Throwable ignored) {
     }
 
-    sender.sendMessage(plugin.color("&aUnbanned &f" + name));
+    sender.sendMessage(plugin.color("&aUnbanned &f" + display));
     return true;
   }
 
   @Override
   public List<String> onTabComplete(
       CommandSender sender, Command command, String alias, String[] args) {
-    if (!sender.isOp() || args.length != 1) {
+    if (!sender.hasPermission("donutrecreation.*") || args.length != 1) {
       return Collections.emptyList();
     }
     List<String> names = new ArrayList<>();
     String lower = args[0].toLowerCase(Locale.ROOT);
-    for (Player p : Bukkit.getOnlinePlayers()) {
-      if (p.getName().toLowerCase(Locale.ROOT).startsWith(lower)) {
-        names.add(p.getName());
+    for (Player player : Bukkit.getOnlinePlayers()) {
+      if (player.getName().toLowerCase(Locale.ROOT).startsWith(lower)) {
+        names.add(player.getName());
       }
     }
     return names;

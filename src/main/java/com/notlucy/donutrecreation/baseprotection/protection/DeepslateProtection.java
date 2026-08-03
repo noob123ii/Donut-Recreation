@@ -1,5 +1,13 @@
 package com.notlucy.donutrecreation.baseprotection.protection;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
+
+import org.bukkit.Location;
+import org.bukkit.World;
+import org.bukkit.entity.Player;
+
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
 import com.github.retrooper.packetevents.protocol.world.chunk.Column;
@@ -13,10 +21,6 @@ import com.notlucy.donutrecreation.baseprotection.packet.BlockIdRegistry;
 import com.notlucy.donutrecreation.baseprotection.renderering.BlockEntityDebugProtection;
 import com.notlucy.donutrecreation.baseprotection.renderering.LightDebugProtection;
 import com.notlucy.donutrecreation.util.LogData;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
-import org.bukkit.entity.Player;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class DeepslateProtection {
@@ -38,6 +42,12 @@ public final class DeepslateProtection {
 
   public boolean rewriteChunk(
       PacketSendEvent event, WrapperPlayServerChunkData wrapper, Player player) {
+
+    var env = player.getWorld().getEnvironment();
+    if (env == org.bukkit.World.Environment.THE_END || env == org.bukkit.World.Environment.NETHER) {
+      return false;
+    }
+
     Column column = wrapper.getColumn();
     BaseChunk[] sections = column.getChunks();
     if (sections == null) {
@@ -89,6 +99,36 @@ public final class DeepslateProtection {
           modifiedSections++;
         }
       }
+
+      if ((lowerRevealed || upperRevealed) && env == org.bukkit.World.Environment.NORMAL) {
+        int lo = Math.max(0, floorY - worldOriginY);
+        int hi = Math.min(16, upperY - worldOriginY);
+        if (hi > lo) {
+          long worldSeed = player.getWorld().getSeed();
+          if (shouldHideOresInChunk(worldSeed, cx, cz)) {
+            int stoneId = ids.stoneId();
+            int oreMasked = 0;
+            for (int x = 0; x < 16; x++) {
+              int wx = worldOriginX + x;
+              for (int z = 0; z < 16; z++) {
+                int wz = worldOriginZ + z;
+                for (int y = lo; y < hi; y++) {
+                  int blockId = section.getBlockId(x, y, z);
+                  if (ids.isOre(blockId) && shouldHideOre(worldSeed, cx, cz, wx, worldOriginY + y, wz)) {
+                    section.set(x, y, z, stoneId);
+                    oreMasked++;
+                  }
+                }
+              }
+            }
+            if (oreMasked > 0) {
+              touched = true;
+              final int masked = oreMasked;
+              LogData.get().fine(() -> "[ore] masked " + masked + " ores in " + cx + "," + cz);
+            }
+          }
+        }
+      }
     }
 
     boolean tilesChanged = handleTiles(column, sections, minSection, cx, cz,
@@ -107,13 +147,6 @@ public final class DeepslateProtection {
         LogData.get().warning("[deepslate] " + player.getName()
             + " chunk=" + cx + "," + cz + " NULL sections below floor=" + nullSections
             + " playerY=" + py);
-      }
-      if (rm.verboseLogging()) {
-        int py = player.getLocation().getBlockY();
-        LogData.get().info("[deepslate] " + player.getName()
-            + " chunk=" + cx + "," + cz + " floorY=" + floorY + " upperY=" + upperY
-            + " sections=" + sections.length + " modified=" + modifiedSections
-            + " null=" + nullSections + " playerY=" + py);
       }
     }
     return touched || nullSections > 0 || tilesChanged;
@@ -173,12 +206,34 @@ public final class DeepslateProtection {
     }
     int airId = ids.airId();
     int swaps = 0;
+    var env = player.getWorld().getEnvironment();
+    boolean isNether = env == org.bukkit.World.Environment.NETHER;
+    boolean isOverworld = env == org.bukkit.World.Environment.NORMAL;
+    int floorY = rm.hideBelowY();
+    int upperY = rm.upperBarrierY();
+    Location playerLoc = player.getLocation();
     for (var enc : wrapper.getBlocks()) {
       int wx = enc.getX();
       int wy = enc.getY();
       int wz = enc.getZ();
       if (!tiles.contains(RevealManager.packPos(wx, wy, wz))) {
         continue;
+      }
+
+      if ((isNether || (isOverworld && wy >= floorY && wy < upperY))) {
+        double dist = Math.sqrt(
+            Math.pow(wx - playerLoc.getX(), 2) +
+            Math.pow(wy - playerLoc.getY(), 2) +
+            Math.pow(wz - playerLoc.getZ(), 2)
+        );
+        if (dist > 50) {
+
+          if (enc.getBlockId() != airId) {
+            enc.setBlockId(airId);
+            swaps++;
+          }
+          continue;
+        }
       }
       if (bandRevealedForTile(player, wx, wy, wz) && rm.shouldMaskTile(player, wx, wy, wz)
           && enc.getBlockId() != airId) {
@@ -331,5 +386,19 @@ public final class DeepslateProtection {
 
   public boolean isWrapperRelevant(WrapperPlayServerMultiBlockChange wrapper) {
     return wrapper != null && wrapper.getChunkPosition() != null && wrapper.getBlocks() != null;
+  }
+
+  private static boolean shouldHideOresInChunk(long worldSeed, int chunkX, int chunkZ) {
+    long mixed = worldSeed ^ ((long) chunkX * 341873128712L + (long) chunkZ * 132897987541L);
+    int hash = (int)(mixed ^ (mixed >>> 32));
+    return (hash & 0x7FFFFFFF) % 100 < 65;
+  }
+
+  private static boolean shouldHideOre(long worldSeed, int chunkX, int chunkZ, int x, int y, int z) {
+    long mixed = worldSeed ^ ((long) chunkX * 341873128712L + (long) chunkZ * 132897987541L);
+    mixed ^= (long) x * 724379273L + (long) y * 537182317L + (long) z * 918273647L;
+    mixed ^= (mixed >>> 31);
+    int hash = (int)(mixed ^ (mixed >>> 32));
+    return (hash & 0x7FFFFFFF) % 100 < 85;
   }
 }

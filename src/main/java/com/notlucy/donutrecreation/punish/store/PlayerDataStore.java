@@ -20,12 +20,6 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.Plugin;
 
-/**
- * Persistent store for ban records, multi-IP histories, fingerprints and join metadata.
- *
- * <p>Backed by a YAML file at {@code <dataFolder>/playerdata.db}. Writes are batched and
- * flushed asynchronously by an internal scheduler started via {@link #startAsyncSaver(Plugin)}.
- */
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class PlayerDataStore {
 
@@ -33,9 +27,6 @@ public final class PlayerDataStore {
   private static final int UUID_HISTORY_PER_IP = 16;
   private static final long SAVE_PERIOD_TICKS = 200L;
 
-  /**
-   * Immutable record of a single ban — the on-disk and in-memory ban entry.
-   */
   public static final class BanRecord {
     public final UUID uuid;
     public final String name;
@@ -61,9 +52,6 @@ public final class PlayerDataStore {
     }
   }
 
-  /**
-   * Mutable per-player profile: rolling IP history, brand fingerprint, and join metadata.
-   */
   public static final class Profile {
     public volatile String name;
     public volatile String fingerprint;
@@ -79,11 +67,11 @@ public final class PlayerDataStore {
 
   private final File file;
   private final ConcurrentMap<UUID, BanRecord> bans = new ConcurrentHashMap<>();
-  private final ConcurrentMap<String, Deque<UUID>> ipToUuids = new ConcurrentHashMap<>();
+  private final ConcurrentMap<String, Deque<UUID>> ips = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
-  private final Object ioLock = new Object();
+  private final Object lock = new Object();
   private volatile boolean dirty = false;
-  private volatile int saverTaskId = -1;
+  private volatile int task = -1;
 
   public PlayerDataStore(File dataFolder) {
     this.file = new File(dataFolder, "playerdata.db");
@@ -91,10 +79,10 @@ public final class PlayerDataStore {
   }
 
   public void startAsyncSaver(Plugin plugin) {
-    if (saverTaskId != -1) {
+    if (task != -1) {
       return;
     }
-    saverTaskId = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
+    task = Bukkit.getScheduler().runTaskTimerAsynchronously(plugin, () -> {
       if (dirty) {
         dirty = false;
         save();
@@ -103,9 +91,9 @@ public final class PlayerDataStore {
   }
 
   public void shutdown() {
-    if (saverTaskId != -1) {
-      Bukkit.getScheduler().cancelTask(saverTaskId);
-      saverTaskId = -1;
+    if (task != -1) {
+      Bukkit.getScheduler().cancelTask(task);
+      task = -1;
     }
     if (dirty) {
       dirty = false;
@@ -113,12 +101,12 @@ public final class PlayerDataStore {
     }
   }
 
-  public void recordJoin(UUID uuid, String name, String ip) {
-    if (uuid == null) {
+  public void recordJoin(UUID id, String name, String ip) {
+    if (id == null) {
       return;
     }
     long now = System.currentTimeMillis();
-    Profile profile = profiles.computeIfAbsent(uuid, k -> {
+    Profile profile = profiles.computeIfAbsent(id, k -> {
       Profile fresh = new Profile();
       fresh.firstSeenAt = now;
       return fresh;
@@ -136,10 +124,10 @@ public final class PlayerDataStore {
           profile.recentIps.pollLast();
         }
       }
-      Deque<UUID> bucket = ipToUuids.computeIfAbsent(ip, k -> new ArrayDeque<>());
+      Deque<UUID> bucket = ips.computeIfAbsent(ip, k -> new ArrayDeque<>());
       synchronized (bucket) {
-        bucket.remove(uuid);
-        bucket.addFirst(uuid);
+        bucket.remove(id);
+        bucket.addFirst(id);
         while (bucket.size() > UUID_HISTORY_PER_IP) {
           bucket.pollLast();
         }
@@ -148,11 +136,11 @@ public final class PlayerDataStore {
     dirty = true;
   }
 
-  public void recordFingerprint(UUID uuid, String fingerprint) {
-    if (uuid == null || fingerprint == null) {
+  public void recordFingerprint(UUID id, String fingerprint) {
+    if (id == null || fingerprint == null) {
       return;
     }
-    Profile profile = profiles.computeIfAbsent(uuid, k -> {
+    Profile profile = profiles.computeIfAbsent(id, k -> {
       Profile fresh = new Profile();
       fresh.firstSeenAt = System.currentTimeMillis();
       return fresh;
@@ -163,69 +151,65 @@ public final class PlayerDataStore {
 
   public void reload() {
     bans.clear();
-    ipToUuids.clear();
+    ips.clear();
     profiles.clear();
     load();
   }
 
-  public void removeBan(UUID uuid) {
-    if (uuid == null) {
+  public void removeBan(UUID id) {
+    if (id == null) {
       return;
     }
-    bans.remove(uuid);
+    bans.remove(id);
     dirty = true;
   }
 
-  public void recordBan(BanRecord record) {
-    if (record == null || record.uuid == null) {
+  public void recordBan(BanRecord ban) {
+    if (ban == null || ban.uuid == null) {
       return;
     }
-    bans.put(record.uuid, record);
-    if (record.ip != null && !record.ip.isEmpty()) {
-      Deque<UUID> bucket = ipToUuids.computeIfAbsent(record.ip, k -> new ArrayDeque<>());
+    bans.put(ban.uuid, ban);
+    if (ban.ip != null && !ban.ip.isEmpty()) {
+      Deque<UUID> bucket = ips.computeIfAbsent(ban.ip, k -> new ArrayDeque<>());
       synchronized (bucket) {
-        bucket.remove(record.uuid);
-        bucket.addFirst(record.uuid);
+        bucket.remove(ban.uuid);
+        bucket.addFirst(ban.uuid);
         while (bucket.size() > UUID_HISTORY_PER_IP) {
           bucket.pollLast();
         }
       }
-      Profile profile = profiles.computeIfAbsent(record.uuid, k -> {
+      Profile profile = profiles.computeIfAbsent(ban.uuid, k -> {
         Profile fresh = new Profile();
         fresh.firstSeenAt = System.currentTimeMillis();
         return fresh;
       });
       synchronized (profile.recentIps) {
-        profile.recentIps.remove(record.ip);
-        profile.recentIps.addFirst(record.ip);
+        profile.recentIps.remove(ban.ip);
+        profile.recentIps.addFirst(ban.ip);
         while (profile.recentIps.size() > IP_HISTORY_PER_UUID) {
           profile.recentIps.pollLast();
         }
       }
-      if (record.name != null) {
-        profile.name = record.name;
+      if (ban.name != null) {
+        profile.name = ban.name;
       }
     }
     dirty = true;
   }
 
-  public BanRecord activeBanFor(UUID uuid) {
-    if (uuid == null) {
+  public BanRecord activeBanFor(UUID id) {
+    if (id == null) {
       return null;
     }
-    BanRecord record = bans.get(uuid);
-    return (record != null && record.isActive(System.currentTimeMillis())) ? record : null;
+    BanRecord ban = bans.get(id);
+    return (ban != null && ban.isActive(System.currentTimeMillis())) ? ban : null;
   }
 
-  /**
-   * Returns the first active ban whose IP-history overlaps {@code ip} and is not the
-   * caller's own UUID. Snapshot-based to avoid mid-iteration mutation issues.
-   */
   public BanRecord activeBanSharingIp(String ip, UUID excluding) {
     if (ip == null || ip.isEmpty()) {
       return null;
     }
-    Deque<UUID> bucket = ipToUuids.get(ip);
+    Deque<UUID> bucket = ips.get(ip);
     if (bucket == null) {
       return null;
     }
@@ -234,30 +218,30 @@ public final class PlayerDataStore {
       snapshot = new ArrayList<>(bucket);
     }
     long now = System.currentTimeMillis();
-    for (UUID candidate : snapshot) {
-      if (candidate.equals(excluding)) {
+    for (UUID id : snapshot) {
+      if (id.equals(excluding)) {
         continue;
       }
-      BanRecord record = bans.get(candidate);
-      if (record != null && record.isActive(now)) {
-        return record;
+      BanRecord ban = bans.get(id);
+      if (ban != null && ban.isActive(now)) {
+        return ban;
       }
     }
     return null;
   }
 
-  public Profile profileOf(UUID uuid) {
-    return profiles.get(uuid);
+  public Profile profileOf(UUID id) {
+    return profiles.get(id);
   }
 
-  public List<UUID> altsOf(UUID uuid) {
-    Profile profile = profiles.get(uuid);
+  public List<UUID> altsOf(UUID id) {
+    Profile profile = profiles.get(id);
     if (profile == null) {
       return Collections.emptyList();
     }
     Set<UUID> linked = new HashSet<>();
     for (String ip : profile.snapshotIps()) {
-      Deque<UUID> bucket = ipToUuids.get(ip);
+      Deque<UUID> bucket = ips.get(ip);
       if (bucket == null) {
         continue;
       }
@@ -265,12 +249,12 @@ public final class PlayerDataStore {
         linked.addAll(bucket);
       }
     }
-    linked.remove(uuid);
+    linked.remove(id);
     return new ArrayList<>(linked);
   }
 
-  public String lastIpFor(UUID uuid) {
-    Profile profile = profiles.get(uuid);
+  public String lastIpFor(UUID id) {
+    Profile profile = profiles.get(id);
     if (profile == null) {
       return null;
     }
@@ -279,8 +263,8 @@ public final class PlayerDataStore {
     }
   }
 
-  public String lastNameFor(UUID uuid) {
-    Profile profile = profiles.get(uuid);
+  public String lastNameFor(UUID id) {
+    Profile profile = profiles.get(id);
     return profile == null ? null : profile.name;
   }
 
@@ -289,16 +273,16 @@ public final class PlayerDataStore {
       return;
     }
     YamlConfiguration yaml = YamlConfiguration.loadConfiguration(file);
-    ConfigurationSection bansSection = yaml.getConfigurationSection("bans");
-    if (bansSection != null) {
-      for (String key : bansSection.getKeys(false)) {
-        ConfigurationSection entry = bansSection.getConfigurationSection(key);
+    ConfigurationSection banSection = yaml.getConfigurationSection("bans");
+    if (banSection != null) {
+      for (String key : banSection.getKeys(false)) {
+        ConfigurationSection entry = banSection.getConfigurationSection(key);
         if (entry == null) {
           continue;
         }
         try {
           UUID id = UUID.fromString(key);
-          BanRecord record = new BanRecord(
+          BanRecord ban = new BanRecord(
               id,
               entry.getString("name"),
               entry.getString("ip"),
@@ -306,15 +290,15 @@ public final class PlayerDataStore {
               entry.getString("bantime", ""),
               entry.getLong("expiresAt", -1L),
               entry.getBoolean("evader", false));
-          bans.put(id, record);
+          bans.put(id, ban);
         } catch (IllegalArgumentException ignored) {
         }
       }
     }
-    ConfigurationSection profilesSection = yaml.getConfigurationSection("profiles");
-    if (profilesSection != null) {
-      for (String key : profilesSection.getKeys(false)) {
-        ConfigurationSection entry = profilesSection.getConfigurationSection(key);
+    ConfigurationSection profileSection = yaml.getConfigurationSection("profiles");
+    if (profileSection != null) {
+      for (String key : profileSection.getKeys(false)) {
+        ConfigurationSection entry = profileSection.getConfigurationSection(key);
         if (entry == null) {
           continue;
         }
@@ -324,8 +308,8 @@ public final class PlayerDataStore {
         profile.firstSeenAt = entry.getLong("firstSeenAt", System.currentTimeMillis());
         profile.lastSeenAt = entry.getLong("lastSeenAt", profile.firstSeenAt);
         profile.joinCount = entry.getInt("joinCount", 0);
-        List<String> ips = entry.getStringList("recentIps");
-        for (String ip : ips) {
+        List<String> recentIps = entry.getStringList("recentIps");
+        for (String ip : recentIps) {
           profile.recentIps.addLast(ip);
         }
         try {
@@ -334,14 +318,14 @@ public final class PlayerDataStore {
         }
       }
     }
-    ConfigurationSection ipsSection = yaml.getConfigurationSection("ips");
-    if (ipsSection != null) {
-      for (String ip : ipsSection.getKeys(false)) {
-        List<String> uuidStrings = ipsSection.getStringList(ip);
-        Deque<UUID> bucket = ipToUuids.computeIfAbsent(ip, k -> new ArrayDeque<>());
-        for (String uuidString : uuidStrings) {
+    ConfigurationSection ipSection = yaml.getConfigurationSection("ips");
+    if (ipSection != null) {
+      for (String ip : ipSection.getKeys(false)) {
+        List<String> ids = ipSection.getStringList(ip);
+        Deque<UUID> bucket = ips.computeIfAbsent(ip, k -> new ArrayDeque<>());
+        for (String id : ids) {
           try {
-            bucket.addLast(UUID.fromString(uuidString));
+            bucket.addLast(UUID.fromString(id));
           } catch (IllegalArgumentException ignored) {
           }
         }
@@ -350,19 +334,19 @@ public final class PlayerDataStore {
   }
 
   private void save() {
-    synchronized (ioLock) {
+    synchronized (lock) {
       YamlConfiguration yaml = new YamlConfiguration();
 
       Map<String, Object> bansOut = new LinkedHashMap<>();
-      for (BanRecord record : bans.values()) {
+      for (BanRecord ban : bans.values()) {
         Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("name", record.name);
-        entry.put("ip", record.ip);
-        entry.put("reason", record.reason);
-        entry.put("bantime", record.banTime);
-        entry.put("expiresAt", record.expiresAt);
-        entry.put("evader", record.evader);
-        bansOut.put(record.uuid.toString(), entry);
+        entry.put("name", ban.name);
+        entry.put("ip", ban.ip);
+        entry.put("reason", ban.reason);
+        entry.put("bantime", ban.banTime);
+        entry.put("expiresAt", ban.expiresAt);
+        entry.put("evader", ban.evader);
+        bansOut.put(ban.uuid.toString(), entry);
       }
       yaml.createSection("bans", bansOut);
 
@@ -381,7 +365,7 @@ public final class PlayerDataStore {
       yaml.createSection("profiles", profilesOut);
 
       Map<String, Object> ipsOut = new LinkedHashMap<>();
-      for (Map.Entry<String, Deque<UUID>> mapEntry : ipToUuids.entrySet()) {
+      for (Map.Entry<String, Deque<UUID>> mapEntry : ips.entrySet()) {
         List<String> list;
         synchronized (mapEntry.getValue()) {
           list = new ArrayList<>(mapEntry.getValue().size());
