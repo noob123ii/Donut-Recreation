@@ -19,43 +19,32 @@ public final class BlockChangeHandler {
     this.amethyst = amethyst;
   }
 
-  public void handle(PacketSendEvent event, Player player) {
+  public boolean handle(PacketSendEvent event, Player player) {
     WrapperPlayServerBlockChange wrapper = new WrapperPlayServerBlockChange(event);
     var pos = wrapper.getBlockPosition();
     if (pos == null) {
-      return;
+      return false;
     }
-    int x = pos.getX();
-    int y = pos.getY();
-    int z = pos.getZ();
+    int x = pos.getX(), y = pos.getY(), z = pos.getZ();
 
-    if (y < rm.hideBelowY()) {
-      int cx = x >> 4, cz = z >> 4;
-      if (!rm.isRevealed(player, cx, cz)) {
-        event.setCancelled(true);
-        return;
-      }
+    if (y < rm.hideBelowY() && !rm.isRevealed(player, x >> 4, z >> 4)) {
+      event.setCancelled(true);
+      return true;
     }
-
-    if (deepslate.rewriteBlockChange(wrapper, player, x, y, z)) {
+    if (deepslate.rewriteBlockChange(wrapper, player, x, y, z)
+        || deepslate.maskTileBlockChange(wrapper, player, x, y, z)
+        || amethyst.rewriteBlockChange(wrapper, player, x, y, z)) {
       event.markForReEncode(true);
-      return;
+      return true;
     }
-    if (deepslate.maskTileBlockChange(wrapper, player, x, y, z)) {
-      event.markForReEncode(true);
-      return;
-    }
-    if (amethyst.rewriteBlockChange(wrapper, player, x, y, z)) {
-      event.markForReEncode(true);
-      return;
-    }
-
     if (y >= rm.hideBelowY()) {
-      var blockState = wrapper.getBlockState();
-      if (blockState != null && deepslate.isSpawner(blockState.getGlobalId())) {
+      var state = wrapper.getBlockState();
+      if (state != null && deepslate.isSpawner(state.getGlobalId())) {
         wrapper.setBlockState(WrappedBlockState.getByGlobalId(deepslate.floorId()));
         event.markForReEncode(true);
+        return true;
       }
     }
+    return false;
   }
 }

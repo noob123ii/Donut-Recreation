@@ -24,40 +24,31 @@ public final class MultiBlockChangeHandler {
     this.ghostBlockManager = gbm;
   }
 
-  public void handle(PacketSendEvent event, Player player) {
+  public boolean handle(PacketSendEvent event, Player player) {
     WrapperPlayServerMultiBlockChange wrapper = new WrapperPlayServerMultiBlockChange(event);
     if (!deepslate.isWrapperRelevant(wrapper)) {
-      return;
+      return false;
     }
-    WrapperPlayServerMultiBlockChange.EncodedBlock[] blocks = wrapper.getBlocks();
-    if (blocks == null || blocks.length == 0) {
-      return;
-    }
-
     var section = wrapper.getChunkPosition();
     if (section == null) {
-      return;
+      return false;
     }
-    int cx = section.getX();
-    int cz = section.getZ();
-
+    int cx = section.getX(), cz = section.getZ();
     boolean chunkRevealed = rm.isRevealed(player, cx, cz);
     boolean upperRevealed = rm.isUpperRevealed(player, cx, cz);
     int salt = rm.saltFor(player.getUniqueId());
+    int floorFixes = 0, spawnerFixes = 0;
+    int floorId = deepslate.floorId(), spawnerId = deepslate.spawnerId();
 
-    int floorFixes = 0;
-    int spawnerFixes = 0;
-    int floorId = deepslate.floorId();
-    int spawnerId = deepslate.spawnerId();
-    for (WrapperPlayServerMultiBlockChange.EncodedBlock enc : blocks) {
+    for (var enc : wrapper.getBlocks()) {
       if (ghostBlockManager != null
           && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), enc.getX(), enc.getY(), enc.getZ())) {
         continue;
       }
       if (deepslate.shouldMaskMultiBlock(enc.getY(), chunkRevealed, upperRevealed)) {
-        int wantId = deepslate.floorIdAt(salt, enc.getX(), enc.getY(), enc.getZ());
-        if (enc.getBlockId() != wantId) {
-          enc.setBlockId(wantId);
+        int want = deepslate.floorIdAt(salt, enc.getX(), enc.getY(), enc.getZ());
+        if (enc.getBlockId() != want) {
+          enc.setBlockId(want);
           floorFixes++;
         }
       } else if (enc.getY() >= rm.hideBelowY() && enc.getBlockId() == spawnerId) {
@@ -65,12 +56,13 @@ public final class MultiBlockChangeHandler {
         spawnerFixes++;
       }
     }
-
     int tileFixes = deepslate.maskTilesMultiBlock(wrapper, player);
     int amFixes = amethyst.rewriteMultiBlock(wrapper, player, chunkRevealed, floorFixes);
 
-    if (floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || tileFixes > 0) {
+    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || tileFixes > 0;
+    if (touched) {
       event.markForReEncode(true);
     }
+    return touched;
   }
 }

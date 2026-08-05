@@ -13,26 +13,23 @@ public final class UpdateLightHandler {
     this.rm = rm;
   }
 
-  public void handle(PacketSendEvent event, Player player) {
+  public boolean handle(PacketSendEvent event, Player player) {
     try {
       WrapperPlayServerUpdateLight wrapper = new WrapperPlayServerUpdateLight(event);
-      int cx = wrapper.getChunkX(0);
-      int cz = wrapper.getChunkZ(0);
-
+      int cx = wrapper.getChunkX(0), cz = wrapper.getChunkZ(0);
       if (rm.isRevealed(player, cx, cz)) {
-        return;
+        return false;
       }
-      int floorSection = rm.hideBelowY() >> 4;
-      int minSection = rm.worldMinY() >> 4;
       var light = wrapper.getLightData();
       if (light == null) {
-        return;
+        return false;
       }
-      LightDebugProtection.stripFloorLight(light, minSection, floorSection);
+      LightDebugProtection.stripFloorLight(light, rm.worldMinY() >> 4, rm.hideBelowY() >> 4);
       event.markForReEncode(true);
+      return true;
     } catch (Throwable e) {
-      LogData.get().warning("[hider] update-light scrub crashed for "
-          + player.getName() + ": " + e);
+      LogData.get().warning("[hider] light scrub crashed for " + player.getName() + ": " + e);
+      return false;
     }
   }
 }

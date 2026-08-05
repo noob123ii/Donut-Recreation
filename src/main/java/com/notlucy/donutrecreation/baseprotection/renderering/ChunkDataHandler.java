@@ -19,42 +19,35 @@ public final class ChunkDataHandler {
     this.amethyst = amethyst;
   }
 
-  public void handle(PacketSendEvent event, Player player) {
+  public boolean handle(PacketSendEvent event, Player player) {
     WrapperPlayServerChunkData wrapper = new WrapperPlayServerChunkData(event);
     int cx = wrapper.getColumn().getX();
     int cz = wrapper.getColumn().getZ();
-    boolean[] rewrote = {false};
+    boolean touched = false;
     try {
-      if (rm.geodeHideEnabled() && amethyst.rewriteChunk(wrapper, player)) {
-        rewrote[0] = true;
+      if (rm.geodeHideEnabled()) {
+        touched = amethyst.rewriteChunk(wrapper, player);
       }
     } catch (Throwable e) {
-      LogData.get().warning("[hider] amethyst rewrite crashed at " + cx + "," + cz
-          + " for " + player.getName() + ": " + e);
-      e.printStackTrace();
+      LogData.get().warning("[hider] amethyst rewrite crashed at " + cx + "," + cz + ": " + e);
     }
     try {
-      rewrote[0] |= deepslate.rewriteChunk(event, wrapper, player);
+      touched |= deepslate.rewriteChunk(event, wrapper, player);
     } catch (Throwable e) {
-      LogData.get().warning("[hider] deepslate rewrite crashed at " + cx + "," + cz
-          + " for " + player.getName() + ": " + e);
-      e.printStackTrace();
+      LogData.get().warning("[hider] deepslate rewrite crashed at " + cx + "," + cz + ": " + e);
     }
-
     try {
-      if (!rm.isRevealed(player, cx, cz)) {
+      if (!touched && !rm.isRevealed(player, cx, cz)) {
         BlockEntityDebugProtection.scrubTilesBelow(wrapper.getColumn(), rm.hideBelowY());
-        rewrote[0] = true;
+        touched = true;
       }
     } catch (Throwable e) {
-      LogData.get().warning("[hider] tile entity scrub crashed at " + cx + "," + cz
-          + " for " + player.getName() + ": " + e);
-      e.printStackTrace();
+      LogData.get().warning("[hider] tile scrub crashed at " + cx + "," + cz + ": " + e);
     }
-    if (rewrote[0]) {
+    if (touched) {
       event.markForReEncode(true);
     }
-
     rm.markChunkDelivered(player.getUniqueId(), cx, cz);
+    return touched;
   }
 }
