@@ -2,9 +2,11 @@
 
 PaperMC plugin that recreates Donut SMP's anti-cheat toolkit on your own server.
 
-Anti-freecam / anti-xray base hider with two-tier masking, geode hiding, a `/acsus` review GUI,
-punishment system with alt-evasion detection, and `/spawnfake` decoys. Client-side trickery done
-via [PacketEvents](https://github.com/retrooper/packetevents) — the real world on disk is
+Anti-freecam / anti-xray base hider with two-tier masking, geode hiding, a `/acsus` review GUI
+fed by behavioural tracking plus flag hooks for Vulcan, Matrix, GrimAC, NoCheatPlus and AAC,
+a punishment system with alt-evasion detection and configurable full-screen ban messages, and
+`/spawnfake` decoys. Client-side trickery done via
+[PacketEvents](https://github.com/retrooper/packetevents) — the real world on disk is
 never touched.
 
 Tested on **Paper 1.21.4**. Requires **Java 21**.
@@ -21,11 +23,15 @@ mining bursts, macro-like repetition, and anti-cheat plugin flags in the backgro
 Anti-cheat detection notifications are broadcast to staff in the format:
 `[Matrix] PlayerName: hack reason (N flags)`
 
+While spectating, a leash task re-teleports you to the target every 10 ticks if they get
+further than 100 blocks away, so the suspect can't shake the review.
+
 ### `/offend <player> <reason>` (alias `/punish`)
 Bans and optionally wipes player data. Reasons defined in `config.yml` under `punishments:`.
-Each ban gets a unique **Ban ID** (e.g. `BAN-1234`) that never repeats. Kick messages show
-time remaining instead of an expiry date. Bans stored in `playerdata.db` for alt-detection.
-OP-only.
+Each ban gets a unique **Ban ID** (e.g. `BAN-1234`) that never repeats. Online players are
+kicked instantly with the full-screen ban message; the same screen shows on every rejoin
+attempt. Kick messages show time remaining instead of an expiry date. Bans stored in
+`playerdata.db` for alt-detection. OP-only.
 
 ### `/unban <player>`
 Unbans a player and clears their evader flag. OP-only.
@@ -33,19 +39,21 @@ Unbans a player and clears their evader flag. OP-only.
 ### `/unwipe <player>`
 Unwipes a player — removes their ban and resets their data. OP-only.
 
-### `/spawnfake <stash|spawner|player|bedrockspawner>`
+### `/spawnfake <stash|spawner|player|bedrockspawner|clear>`
 Spawns ephemeral ghost-blocks and NPCs. Requires staffmode.
-- `stash` — 6x6x4 hollow stone room with chests, visible only to you, reverts in 5 min
+- `stash [template]` — ghost stash room from a template in `plugins/DonutRecreation/stashes/`
+  (`.yml` templates; `.litematic` and `.mcfunction` files are auto-converted on load)
 - `spawner` — ghost spawner where you're looking
 - `player` — 10-second NPC standing in front of you
 - `bedrockspawner` — spawner setup at y=63 with a fake player
+- `clear` — despawns all of your ghost blocks, fake players and decoys
 
-### `/staffmode`
+### `/staffmode [hidename|hideskin|showtps]`
 Toggles staff mode. Blocks non-whitelisted commands while active. Required for `/spawnfake`.
 Action bar shows green "Staffmode: Enabled" or red "Staffmode: Disabled" on toggle.
-
-### `/staffmode showtps`
-Toggles a live TPS/ping display in the action bar for staff.
+- `hidename` — hide other players' nametags from you (server-side teams trick)
+- `hideskin` — hide other players' skins from you
+- `showtps` — toggles a live TPS/ping display in the action bar for staff
 
 ### `/donut reload`
 Reloads config without restart. Works from both console and in-game. OP-only.
@@ -108,6 +116,24 @@ Punishments are configured in `config.yml` under `punishments:`. Each reason sup
 Ban records are stored with a unique Ban ID that can be used to link accounts.
 Time is shown as remaining duration (e.g. "2d 5h 30m") rather than an expiry date.
 
+The ban screen is fully configurable via the top-level `ban-message` key in `config.yml`
+(default below). Placeholders: `%reason%`, `%duration%`, `%time_remaining%`, `%ban_id%`:
+
+```
+&c&lYOU ARE BANNED
+
+&7Reason: &f%reason%
+&7Duration: &f%duration%
+&7Time remaining: &f%time_remaining%
+&7Ban ID: &f%ban_id%
+
+&7Appeal at &fhttps://dc.cloudmc.lol/
+```
+
+With `ResetData: true`, economy balances from CoinsEngine are reset to the values under
+`punishments.new-player-balances` (or zeroed) and ender chests from VariableEnderChests are
+cleared, in addition to the vanilla inventory and stats wipe.
+
 ---
 
 ## Installation
@@ -137,6 +163,7 @@ Output: `build/libs/DonutRecreation.jar`
 - `hider.flood-fill-budget` — lower for less CPU, raise for better cave reveal
 - `hider.max-revealed-chunks-per-player` — memory vs coverage tradeoff
 - `punishments:` — reason/duration/data-wipe per offence type
+- `ban-message` — ban screen template (`%reason%`, `%duration%`, `%time_remaining%`, `%ban_id%`)
 - `alt-ban-policy` — strict / new-accounts-only / flag-only
 - `alt-ban-threshold` — minimum banned alts on same IP before auto-ban (default 5)
 
@@ -152,6 +179,9 @@ Single YAML database at `plugins/DonutRecreation/playerdata.db`:
 Geode data cached in `plugins/DonutRecreation/geode-cache/`:
 - `scanned.dat` — which chunks have been scanned
 - `geodes.dat` — stored geode positions
+
+Captured player skins for `/staffmode hideskin` and fake players stored in `skins.yml`.
+Stash templates loaded from `plugins/DonutRecreation/stashes/` (see `/spawnfake`).
 
 Staff mode state persisted in `plugins/DonutRecreation/staffdata.yml`.
 
