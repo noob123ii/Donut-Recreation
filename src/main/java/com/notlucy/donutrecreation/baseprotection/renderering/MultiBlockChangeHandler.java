@@ -56,10 +56,9 @@ public final class MultiBlockChangeHandler {
         spawnerFixes++;
       }
     }
-    int tileFixes = deepslate.maskTilesMultiBlock(wrapper, player);
     int amFixes = amethyst.rewriteMultiBlock(wrapper, player, chunkRevealed, floorFixes);
 
-    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || tileFixes > 0;
+    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0;
     if (touched) {
       event.markForReEncode(true);
     }

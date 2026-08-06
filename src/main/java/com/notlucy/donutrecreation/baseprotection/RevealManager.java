@@ -73,6 +73,7 @@ public class RevealManager {
   private final boolean    geodeOn;
   private final int        geodeRadius;
   private final long       geodeRadiusSq;
+  private final int        fakeGeodeAmethystPerChunk;
   private final BlockData  fakeAmethyst;
   private final boolean    verbose;
   private final int        floodThrottleTicks;
@@ -114,6 +115,8 @@ public class RevealManager {
     this.geodeOn      = cfg.getBoolean("hider.geode-hide-enabled", true);
     this.geodeRadius  = cfg.getInt("hider.geode-reveal-radius", 8);
     this.geodeRadiusSq = (long) geodeRadius * geodeRadius;
+    this.fakeGeodeAmethystPerChunk = Math.max(1,
+        cfg.getInt("hider.fake-geode-amethyst-per-chunk", 24));
     this.fakeAmethyst = Material.STONE.createBlockData();
     this.verbose      = cfg.getBoolean("hider.verbose-logging", false);
     this.floodThrottleTicks   = cfg.getInt("hider.flood-fill-throttle-ticks", 10);
@@ -129,11 +132,11 @@ public class RevealManager {
 
   public int hideBelowY()   { return floorY; }
   public int upperBarrierY() { return upperY; }
-  public boolean tileMaskEnabled() { return false; }
   public int worldMinY()    { return worldMinY; }
   public int initialRadius() { return initialRadius; }
   public int movementRadius() { return movementRadius; }
   public boolean geodeHideEnabled() { return geodeOn; }
+  public int fakeGeodeAmethystPerChunk() { return fakeGeodeAmethystPerChunk; }
   public boolean verboseLogging()   { return verbose; }
   public DonutRecreation plugin()   { return plugin; }
 
@@ -163,7 +166,10 @@ public class RevealManager {
   public static int unpackZ(long p) { return (int) ((p >>> 12) & 0xFFFFFFL) - (1 << 23); }
   public static int unpackY(long p) { return (int) (p & 0xFFFL) - (1 << 11); }
 
-  public void markRuntimeBypass(UUID id) {}
+  public void markRuntimeBypass(UUID id) {
+    bypassed.add(id);
+  }
+
   public void clearRuntimeBypass(UUID id) {
     if (id != null) bypassed.remove(id);
   }
@@ -180,12 +186,6 @@ public class RevealManager {
     Set<Long> set = revealedUpper.get(player.getUniqueId());
     return set != null && set.contains(chunkKey(chunkX, chunkZ));
   }
-
-  public void recordTiles(long chunkKey, Set<Long> positions) { }
-  public Set<Long> tilePositions(long chunkKey) { return null; }
-  public boolean tileInMaskZone(int viewerY, int tileY) { return false; }
-  public boolean tileWithinRender(Player viewer, int x, int y, int z) { return false; }
-  public boolean shouldMaskTile(Player viewer, int x, int y, int z) { return false; }
 
   public void recordGeodeChunk(long chunkKey, Set<Long> positions) {
     scannedGeodes.add(chunkKey);
@@ -257,6 +257,23 @@ public class RevealManager {
     this.ghostBlockManager = gbm;
   }
 
+  private ChunkRevealListener chunkRevealCallback;
+
+  @FunctionalInterface
+  public interface ChunkRevealListener {
+    void onChunkRevealed(Player player, int chunkX, int chunkZ);
+  }
+
+  public void setChunkRevealCallback(ChunkRevealListener callback) {
+    this.chunkRevealCallback = callback;
+  }
+
+  private void notifyChunkRevealed(Player player, int chunkX, int chunkZ) {
+    if (chunkRevealCallback != null) {
+      chunkRevealCallback.onChunkRevealed(player, chunkX, chunkZ);
+    }
+  }
+
   public void recomputeForPlayer(Player player) {
     if (!player.isOnline()) return;
     UUID id  = player.getUniqueId();
@@ -313,6 +330,7 @@ public class RevealManager {
 
       current.add(k);
       sendUnderworldBlocks(player, keyX(k), keyZ(k));
+      notifyChunkRevealed(player, keyX(k), keyZ(k));
       sent++;
     }
 
@@ -344,7 +362,11 @@ public class RevealManager {
 
     if (toReveal.isEmpty() && toHide.isEmpty()) return;
 
-    for (long k : toReveal) { sendUpperBand(player, keyX(k), keyZ(k), false); current.add(k); }
+    for (long k : toReveal) {
+      sendUpperBand(player, keyX(k), keyZ(k), false);
+      current.add(k);
+      notifyChunkRevealed(player, keyX(k), keyZ(k));
+    }
 
     for (long k : toHide)   { sendUpperBand(player, keyX(k), keyZ(k), true);  current.remove(k); }
 
@@ -428,6 +450,10 @@ public class RevealManager {
     for (long packed : positions) {
       int x = unpackX(packed), y = unpackY(packed), z = unpackZ(packed);
       if (!world.isChunkLoaded(x >> 4, z >> 4)) continue;
+      if (ghostBlockManager != null
+          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
+        continue;
+      }
       Block live = world.getBlockAt(x, y, z);
       changes.put(new Location(world, x, y, z), live.getBlockData());
       if (!isAmethyst(live.getType())) {
@@ -459,8 +485,14 @@ public class RevealManager {
     BlockData belowMask = fakeFloorPalette[0];
     BlockData aboveMask = fakeAmethyst;
     for (long packed : positions) {
+      int x = unpackX(packed);
       int y = unpackY(packed);
-      changes.put(new Location(world, unpackX(packed), y, unpackZ(packed)),
+      int z = unpackZ(packed);
+      if (ghostBlockManager != null
+          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
+        continue;
+      }
+      changes.put(new Location(world, x, y, z),
           (y < floorY) ? belowMask : aboveMask);
     }
     if (!changes.isEmpty()) player.sendMultiBlockChange(changes);
@@ -477,7 +509,7 @@ public class RevealManager {
 
   public void updateEntityVisibility(Player player) {
     if (!player.isOnline()) return;
-    UUID viewerId  = player.getUniqueId();
+    UUID viewerId = player.getUniqueId();
 
     long nowTick = currentTick();
     Long lastScan = lastEntityScanTick.get(viewerId);
@@ -485,21 +517,19 @@ public class RevealManager {
     lastEntityScanTick.put(viewerId, nowTick);
     Set<UUID> hidden = hiddenEntities.computeIfAbsent(viewerId, k -> ConcurrentHashMap.newKeySet());
     Location playerLoc = player.getLocation();
-    int viewerY  = playerLoc.getBlockY();
 
-    boolean viewerUnderground = viewerY < upperY;
+    boolean viewerUnderground = playerLoc.getBlockY() < upperY;
     int pcx = playerLoc.getBlockX() >> 4;
     int pcz = playerLoc.getBlockZ() >> 4;
     int radius = entityScanChunkRadius;
-    double blockRadius  = radius * 16.0;
-
-    double proximitySq  = 30.0 * 30.0;
+    double blockRadius = radius * 16.0;
+    double proximitySq = 30.0 * 30.0;
 
     Iterable<Entity> nearby;
     try {
       nearby = player.getWorld().getNearbyEntities(playerLoc,
           blockRadius, Math.max(blockRadius, 64.0), blockRadius);
-    } catch (Throwable ignored) {
+    } catch (Exception e) {
       nearby = player.getWorld().getEntities();
     }
 
@@ -516,73 +546,7 @@ public class RevealManager {
         continue;
       }
 
-      boolean entityUnderground = eLoc.getY() < upperY;
-      boolean isOtherPlayer = e instanceof Player;
-      boolean isDroppedItem = e instanceof org.bukkit.entity.Item;
-      boolean isItemFrame = e instanceof org.bukkit.entity.ItemFrame;
-
-      boolean shouldHide;
-
-      if (isDroppedItem) {
-        if (!entityUnderground) {
-
-          shouldHide = false;
-        } else if (!viewerUnderground) {
-
-          shouldHide = true;
-        } else {
-
-          int itemCx = eLoc.getBlockX() >> 4;
-          int itemCz = eLoc.getBlockZ() >> 4;
-          boolean itemChunkRevealed = isRevealed(player, itemCx, itemCz);
-          if (itemChunkRevealed) {
-            shouldHide = false;
-          } else {
-            double dx = eLoc.getX() - playerLoc.getX();
-            double dy = eLoc.getY() - playerLoc.getY();
-            double dz = eLoc.getZ() - playerLoc.getZ();
-            shouldHide = (dx * dx + dy * dy + dz * dz) > proximitySq;
-          }
-        }
-      } else if (isItemFrame) {
-        if (!entityUnderground) {
-
-          shouldHide = false;
-        } else if (!viewerUnderground) {
-
-          shouldHide = true;
-        } else {
-
-          double dx = eLoc.getX() - playerLoc.getX();
-          double dy = eLoc.getY() - playerLoc.getY();
-          double dz = eLoc.getZ() - playerLoc.getZ();
-          shouldHide = (dx * dx + dy * dy + dz * dz) > proximitySq;
-        }
-      } else if (!entityUnderground) {
-
-        shouldHide = false;
-
-      } else if (!viewerUnderground) {
-
-        shouldHide = isOtherPlayer;
-
-      } else {
-
-        int chunkRevealedCx = eLoc.getBlockX() >> 4;
-        int chunkRevealedCz = eLoc.getBlockZ() >> 4;
-        boolean chunkRevealed = isRevealed(player, chunkRevealedCx, chunkRevealedCz);
-
-        if (chunkRevealed) {
-
-          shouldHide = false;
-        } else {
-
-          double dx = eLoc.getX() - playerLoc.getX();
-          double dy = eLoc.getY() - playerLoc.getY();
-          double dz = eLoc.getZ() - playerLoc.getZ();
-          shouldHide = (dx * dx + dy * dy + dz * dz) > proximitySq;
-        }
-      }
+      boolean shouldHide = shouldHideEntity(e, eLoc, player, playerLoc, viewerUnderground, proximitySq);
 
       if (shouldHide) {
         if (hidden.add(eid)) player.hideEntity(plugin, e);
@@ -590,6 +554,34 @@ public class RevealManager {
         if (hidden.remove(eid)) player.showEntity(plugin, e);
       }
     }
+  }
+
+  private boolean shouldHideEntity(Entity e, Location eLoc, Player viewer, Location viewerLoc,
+      boolean viewerUnderground, double proximitySq) {
+    boolean underground = eLoc.getY() < upperY;
+
+    if (!underground) return false;
+    if (!viewerUnderground) return e instanceof Player;
+
+    int ecx = eLoc.getBlockX() >> 4;
+    int ecz = eLoc.getBlockZ() >> 4;
+
+    if (e instanceof org.bukkit.entity.Item) {
+      return !isRevealed(viewer, ecx, ecz) && distSq(eLoc, viewerLoc) > proximitySq;
+    }
+
+    if (e instanceof org.bukkit.entity.ItemFrame) {
+      return distSq(eLoc, viewerLoc) > proximitySq;
+    }
+
+    return !isRevealed(viewer, ecx, ecz) && distSq(eLoc, viewerLoc) > proximitySq;
+  }
+
+  private static double distSq(Location a, Location b) {
+    double dx = a.getX() - b.getX();
+    double dy = a.getY() - b.getY();
+    double dz = a.getZ() - b.getZ();
+    return dx * dx + dy * dy + dz * dz;
   }
 
   public void clearEntityVisibility(UUID playerId) {
@@ -736,7 +728,7 @@ public class RevealManager {
     return ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | (y & 0xFFF);
   }
 
-  private boolean hasLineOfSightToChunk(Player player, int chunkX, int chunkZ) {
+  private boolean raycastTo(Player player, int chunkX, int chunkZ, double targetY, boolean verboseLos) {
     Location eye = player.getEyeLocation();
     World world = eye.getWorld();
     if (world == null) return false;
@@ -745,8 +737,8 @@ public class RevealManager {
     if (chunkX == pcx && chunkZ == pcz) return true;
 
     double ox = eye.getX(), oy = eye.getY(), oz = eye.getZ();
-    double tx = (chunkX << 4) + 8.5, ty = oy, tz = (chunkZ << 4) + 8.5;
-    double rdx = tx - ox, rdy = ty - oy, rdz = tz - oz;
+    double tx = (chunkX << 4) + 8.5, tz = (chunkZ << 4) + 8.5;
+    double rdx = tx - ox, rdy = targetY - oy, rdz = tz - oz;
     double distSq = rdx * rdx + rdy * rdy + rdz * rdz;
     if (distSq < 0.0001) return true;
 
@@ -755,24 +747,42 @@ public class RevealManager {
     int stepY = rdy > 0 ? 1 : (rdy < 0 ? -1 : 0);
     int stepZ = rdz > 0 ? 1 : (rdz < 0 ? -1 : 0);
 
-    double tMaxX, tMaxY, tMaxZ, tDeltaX, tDeltaY, tDeltaZ;
-    if (stepX != 0) { tDeltaX = 1.0 / Math.abs(rdx); double bX = stepX > 0 ? Math.floor(ox) + 1.0 : Math.ceil(ox) - 1.0; tMaxX = (bX - ox) / rdx; } else { tDeltaX = Double.MAX_VALUE; tMaxX = Double.MAX_VALUE; }
-    if (stepY != 0) { tDeltaY = 1.0 / Math.abs(rdy); double bY = stepY > 0 ? Math.floor(oy) + 1.0 : Math.ceil(oy) - 1.0; tMaxY = (bY - oy) / rdy; } else { tDeltaY = Double.MAX_VALUE; tMaxY = Double.MAX_VALUE; }
-    if (stepZ != 0) { tDeltaZ = 1.0 / Math.abs(rdz); double bZ = stepZ > 0 ? Math.floor(oz) + 1.0 : Math.ceil(oz) - 1.0; tMaxZ = (bZ - oz) / rdz; } else { tDeltaZ = Double.MAX_VALUE; tMaxZ = Double.MAX_VALUE; }
+    double tDeltaX = stepX != 0 ? 1.0 / Math.abs(rdx) : Double.MAX_VALUE;
+    double tDeltaY = stepY != 0 ? 1.0 / Math.abs(rdy) : Double.MAX_VALUE;
+    double tDeltaZ = stepZ != 0 ? 1.0 / Math.abs(rdz) : Double.MAX_VALUE;
+    double tMaxX = stepX != 0 ? ((stepX > 0 ? Math.floor(ox) + 1.0 : Math.ceil(ox) - 1.0) - ox) / rdx : Double.MAX_VALUE;
+    double tMaxY = stepY != 0 ? ((stepY > 0 ? Math.floor(oy) + 1.0 : Math.ceil(oy) - 1.0) - oy) / rdy : Double.MAX_VALUE;
+    double tMaxZ = stepZ != 0 ? ((stepZ > 0 ? Math.floor(oz) + 1.0 : Math.ceil(oz) - 1.0) - oz) / rdz : Double.MAX_VALUE;
 
     int maxSteps = (int) (Math.sqrt(distSq) * 2.0) + 32;
+    int floorBound = (int) Math.floor(targetY);
     for (int step = 0; step < maxSteps; step++) {
       if (step > 0) {
+        if (stepY < 0 && by <= floorBound) return true;
+        if (stepY > 0 && by >= floorBound) return true;
         if (bx >> 4 == chunkX && bz >> 4 == chunkZ) return true;
         if (!world.isChunkLoaded(bx >> 4, bz >> 4)) return true;
-        Block block = world.getBlockAt(bx, by, bz);
-        if (block.getType().isOccluding()) return false;
+        if (world.getBlockAt(bx, by, bz).getType().isOccluding()) {
+          if (verboseLos && verbose) LogData.get().info("[hider-los] " + player.getName()
+              + " blocked -> " + chunkX + "," + chunkZ
+              + " at " + bx + "," + by + "," + bz + " (step " + step + ")");
+          return false;
+        }
       }
       if (tMaxX < tMaxY && tMaxX < tMaxZ) { bx += stepX; tMaxX += tDeltaX; }
       else if (tMaxY < tMaxZ) { by += stepY; tMaxY += tDeltaY; }
       else { bz += stepZ; tMaxZ += tDeltaZ; }
     }
     return true;
+  }
+
+  private boolean hasLineOfSightToChunk(Player player, int chunkX, int chunkZ) {
+    Location eye = player.getEyeLocation();
+    return raycastTo(player, chunkX, chunkZ, eye.getY(), false);
+  }
+
+  private boolean hasLineOfSightToFloor(Player player, int chunkX, int chunkZ) {
+    return raycastTo(player, chunkX, chunkZ, floorY - 0.5, true);
   }
 
   private boolean isPlayerLookingAtChunk(Player player, int chunkX, int chunkZ) {
@@ -790,52 +800,6 @@ public class RevealManager {
 
     double dot = dir.getX() * toChunk.getX() + dir.getY() * toChunk.getY() + dir.getZ() * toChunk.getZ();
     return dot > 0.707;
-  }
-
-  private boolean hasLineOfSightToFloor(Player player, int chunkX, int chunkZ) {
-    Location eye = player.getEyeLocation();
-    World world  = eye.getWorld();
-    if (world == null) return false;
-
-    int pcx = eye.getBlockX() >> 4, pcz = eye.getBlockZ() >> 4;
-    if (chunkX == pcx && chunkZ == pcz) return true;
-
-    double ox = eye.getX(), oy = eye.getY(), oz = eye.getZ();
-    double tx = (chunkX << 4) + 8.5, ty = floorY - 0.5, tz = (chunkZ << 4) + 8.5;
-    double rdx = tx - ox, rdy = ty - oy, rdz = tz - oz;
-    double distSq = rdx * rdx + rdy * rdy + rdz * rdz;
-    if (distSq < 0.0001) return true;
-
-    int bx = (int) Math.floor(ox), by = (int) Math.floor(oy), bz = (int) Math.floor(oz);
-    int stepX = rdx > 0 ? 1 : (rdx < 0 ? -1 : 0);
-    int stepY = rdy > 0 ? 1 : (rdy < 0 ? -1 : 0);
-    int stepZ = rdz > 0 ? 1 : (rdz < 0 ? -1 : 0);
-
-    double tMaxX, tMaxY, tMaxZ, tDeltaX, tDeltaY, tDeltaZ;
-    if (stepX != 0) { tDeltaX = 1.0 / Math.abs(rdx); double bX = stepX > 0 ? Math.floor(ox) + 1.0 : Math.ceil(ox) - 1.0; tMaxX = (bX - ox) / rdx; } else { tDeltaX = Double.MAX_VALUE; tMaxX = Double.MAX_VALUE; }
-    if (stepY != 0) { tDeltaY = 1.0 / Math.abs(rdy); double bY = stepY > 0 ? Math.floor(oy) + 1.0 : Math.ceil(oy) - 1.0; tMaxY = (bY - oy) / rdy; } else { tDeltaY = Double.MAX_VALUE; tMaxY = Double.MAX_VALUE; }
-    if (stepZ != 0) { tDeltaZ = 1.0 / Math.abs(rdz); double bZ = stepZ > 0 ? Math.floor(oz) + 1.0 : Math.ceil(oz) - 1.0; tMaxZ = (bZ - oz) / rdz; } else { tDeltaZ = Double.MAX_VALUE; tMaxZ = Double.MAX_VALUE; }
-
-    int maxSteps = (int) (Math.sqrt(distSq) * 2.0) + 32;
-    for (int step = 0; step < maxSteps; step++) {
-      if (step > 0) {
-        if (stepY < 0 && by <= (int) Math.floor(ty)) return true;
-        if (stepY > 0 && by >= (int) Math.floor(ty)) return true;
-        if (bx >> 4 == chunkX && bz >> 4 == chunkZ)  return true;
-        if (!world.isChunkLoaded(bx >> 4, bz >> 4))   return true;
-        Block block = world.getBlockAt(bx, by, bz);
-        if (block.getType().isOccluding()) {
-          if (verbose) LogData.get().info("[hider-los] " + player.getName()
-              + " blocked -> " + chunkX + "," + chunkZ + " wall=" + block.getType()
-              + " at " + bx + "," + by + "," + bz + " (step " + step + ")");
-          return false;
-        }
-      }
-      if (tMaxX < tMaxY && tMaxX < tMaxZ) { bx += stepX; tMaxX += tDeltaX; }
-      else if (tMaxY < tMaxZ)              { by += stepY; tMaxY += tDeltaY; }
-      else                                 { bz += stepZ; tMaxZ += tDeltaZ; }
-    }
-    return true;
   }
 
   private static boolean isPassable(Block block) {
@@ -865,8 +829,6 @@ public class RevealManager {
       revealedGeodes.remove(id);
     }
   }
-
-  public void clearShownTiles(UUID id) { }
 
   public void clearHiddenEntities(Player player) {
     if (player == null) return;
@@ -1038,10 +1000,6 @@ public class RevealManager {
     int chunkX = chunk.getX();
     int chunkZ = chunk.getZ();
     onChunkUnload(chunkX, chunkZ);
-  }
-
-  public void onPlayerChangeWorld(UUID worldUid) {
-
   }
 
   public UUID getPlayerWorldUid(Player player) {

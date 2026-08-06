@@ -1,14 +1,11 @@
 package com.notlucy.donutrecreation.punish.listeners;
 
-import com.destroystokyo.paper.profile.PlayerProfile;
 import com.notlucy.donutrecreation.DonutRecreation;
 import com.notlucy.donutrecreation.punish.store.PlayerDataStore;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.net.InetAddress;
-import java.time.Instant;
 import java.util.Locale;
 import java.util.UUID;
-import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -49,15 +46,8 @@ public final class AltBanListener implements Listener {
 
     PlayerDataStore.BanRecord ban = store.activeBanFor(event.getUniqueId());
     if (ban != null) {
-      String msg = plugin.color(
-          "&c&lYOU ARE BANNED\n\n"
-              + "&7Reason: &f" + ban.reason + "\n"
-              + "&7Duration: &f" + ban.banTime + "\n"
-              + "&7Time remaining: &f" + ban.timeRemaining() + "\n"
-              + "&7Banned: &f" + ban.timeSince() + "\n"
-              + "&7Ban ID: &f" + ban.banId + "\n\n"
-              + "&7Appeal at &9discord.gg/example");
-      event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED, msg);
+      event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_BANNED,
+          plugin.banScreenMessage(ban));
       return;
     }
 
@@ -103,14 +93,6 @@ public final class AltBanListener implements Listener {
         expiresAt,
         true);
     store.recordBan(evader);
-
-    try {
-      PlayerProfile profile = Bukkit.createProfile(event.getUniqueId(), event.getName());
-      @SuppressWarnings("deprecation")
-      BanList<PlayerProfile> banList = Bukkit.getBanList(BanList.Type.PROFILE);
-      banList.addBan(profile, EVADE_REASON, Instant.ofEpochMilli(expiresAt), "AltBanListener");
-    } catch (Throwable ignored) {
-    }
 
     String msg = plugin.color(
         "&c&lBAN EVASION DETECTED\n\n"

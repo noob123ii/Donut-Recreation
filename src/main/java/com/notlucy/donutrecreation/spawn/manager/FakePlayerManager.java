@@ -43,27 +43,32 @@ public final class FakePlayerManager {
     final int entityId;
     final UUID uuid;
     final String name;
+    final SkinStore.SkinRecord copy;
     final Location location;
     final Pose pose;
     final Map<UUID, Boolean> visibleTo = new ConcurrentHashMap<>();
 
-    Npc(int entityId, UUID uuid, String name, Location location, Pose pose) {
+    Npc(int entityId, UUID uuid, String name, SkinStore.SkinRecord copy,
+        Location location, Pose pose) {
       this.entityId = entityId;
       this.uuid = uuid;
       this.name = name;
+      this.copy = copy;
       this.location = location.clone();
       this.pose = pose;
     }
   }
 
   private final Plugin plugin;
+  private final SkinStore skins;
   private final ConcurrentMap<Integer, Npc> active = new ConcurrentHashMap<>();
   private final AtomicInteger entityIdCounter = new AtomicInteger(-1);
   private boolean tickTaskStarted;
 
   @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Plugin shared by Bukkit.")
-  public FakePlayerManager(Plugin plugin) {
+  public FakePlayerManager(Plugin plugin, SkinStore skins) {
     this.plugin = plugin;
+    this.skins = skins;
   }
 
   public enum Pose {
@@ -80,11 +85,24 @@ public final class FakePlayerManager {
     return spawn(location, name, ttlTicks, crawling ? Pose.CRAWLING : Pose.STANDING);
   }
 
+  public int spawn(Location location, SkinStore.SkinRecord copy, long ttlTicks, Pose pose) {
+    if (copy == null) {
+      return -1;
+    }
+    return spawn(location, copy.name(), copy.uuid(), copy, ttlTicks, pose);
+  }
+
   public int spawn(Location location, String name, long ttlTicks, Pose pose) {
+    SkinStore.SkinRecord copy = skins.byName(name);
+    UUID uuid = copy != null ? copy.uuid() : UUID.randomUUID();
+    return spawn(location, name, uuid, copy, ttlTicks, pose);
+  }
+
+  private int spawn(Location location, String name, UUID uuid,
+      SkinStore.SkinRecord copy, long ttlTicks, Pose pose) {
     int entityId = entityIdCounter.getAndDecrement();
-    UUID uuid = UUID.randomUUID();
     try {
-      UserProfile profile = resolveSkin(name, uuid);
+      UserProfile profile = resolveProfile(name, uuid, copy);
 
       WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
           new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(
@@ -106,7 +124,7 @@ public final class FakePlayerManager {
           entityId, uuid, EntityTypes.PLAYER, packetLocation,
           location.getYaw(), 0, new Vector3d(0, 0, 0));
 
-      Npc npc = new Npc(entityId, uuid, name, location, pose);
+      Npc npc = new Npc(entityId, uuid, name, copy, location, pose);
       active.put(entityId, npc);
 
       for (Player viewer : Bukkit.getOnlinePlayers()) {
@@ -193,7 +211,7 @@ public final class FakePlayerManager {
 
   private void showTo(Player viewer, Npc npc, boolean showEntity) {
     try {
-      UserProfile profile = resolveSkin(npc.name, npc.uuid);
+      UserProfile profile = resolveProfile(npc.name, npc.uuid, npc.copy);
       WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
           new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(
               profile, true, 0, GameMode.SURVIVAL, Component.text(npc.name), null);
@@ -220,7 +238,7 @@ public final class FakePlayerManager {
 
   private void showTablistOnly(Player viewer, Npc npc) {
     try {
-      UserProfile profile = resolveSkin(npc.name, npc.uuid);
+      UserProfile profile = resolveProfile(npc.name, npc.uuid, npc.copy);
       WrapperPlayServerPlayerInfoUpdate.PlayerInfo info =
           new WrapperPlayServerPlayerInfoUpdate.PlayerInfo(
               profile, true, 0, GameMode.SURVIVAL, Component.text(npc.name), null);
@@ -269,11 +287,40 @@ public final class FakePlayerManager {
     }
   }
 
-  private static UserProfile resolveSkin(String name, UUID npcUuid) {
+  private static UserProfile resolveProfile(String name, UUID npcUuid,
+      SkinStore.SkinRecord copy) {
+    if (copy != null) {
+      return new UserProfile(copy.uuid(), copy.name(), List.of(
+          new com.github.retrooper.packetevents.protocol.player.TextureProperty(
+              "textures", copy.texture(), copy.signature())));
+    }
     Player online = Bukkit.getPlayerExact(name);
     if (online != null) {
+      SkinStore.SkinRecord live = captureLiveSkin(online);
+      if (live != null) {
+        return new UserProfile(live.uuid(), live.name(), List.of(
+            new com.github.retrooper.packetevents.protocol.player.TextureProperty(
+                "textures", live.texture(), live.signature())));
+      }
       return new UserProfile(online.getUniqueId(), online.getName());
     }
     return new UserProfile(npcUuid, name);
+  }
+
+  private static SkinStore.SkinRecord captureLiveSkin(Player player) {
+    try {
+      com.destroystokyo.paper.profile.PlayerProfile profile = player.getPlayerProfile();
+      for (com.destroystokyo.paper.profile.ProfileProperty property : profile.getProperties()) {
+        if ("textures".equals(property.getName()) && property.getValue() != null
+            && !property.getValue().isEmpty()) {
+          return new SkinStore.SkinRecord(
+              player.getUniqueId(), player.getName(),
+              property.getValue(), property.getSignature());
+        }
+      }
+      return null;
+    } catch (Throwable ignored) {
+      return null;
+    }
   }
 }

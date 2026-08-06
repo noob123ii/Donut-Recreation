@@ -227,6 +227,7 @@ public final class StashManager {
           data = mat.createBlockData();
         }
         if (data.getMaterial() == Material.AIR || data.getMaterial() == Material.CAVE_AIR) {
+          blocks.add(new StashBlock(x, y, z, data));
           continue;
         }
         blocks.add(new StashBlock(x, y, z, data));
@@ -321,11 +322,21 @@ public final class StashManager {
       int steps = yawToSteps(yaw);
       List<GhostBlockManager.GhostBlock> list = new ArrayList<>(blocks.size());
       for (StashBlock b : blocks) {
+        int[] rot = rotateOffset(b.x, b.z, steps);
         BlockData rotated = rotateBlockData(b.data, steps);
         list.add(new GhostBlockManager.GhostBlock(
-            new Location(world, ox + b.x, oy + b.y, oz + b.z), rotated));
+            new Location(world, ox + rot[0], oy + b.y, oz + rot[1]), rotated));
       }
       return list;
+    }
+
+    private static int[] rotateOffset(int x, int z, int steps) {
+      return switch (steps & 3) {
+        case 1 -> new int[]{-z, x};
+        case 2 -> new int[]{-x, -z};
+        case 3 -> new int[]{z, -x};
+        default -> new int[]{x, z};
+      };
     }
 
     private static int yawToSteps(float yaw) {

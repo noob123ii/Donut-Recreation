@@ -26,6 +26,7 @@ hider:
   entity-scan-chunk-radius: 4
   geode-hide-enabled: true
   geode-reveal-radius: 3
+  fake-geode-amethyst-per-chunk: 24
   max-geode-chunks: 1024
   block-natural-spawns-below-hide: true
   block-all-spawns-below-hide: false
@@ -42,7 +43,20 @@ hider:
   void-spawn-pitch: 0
   verbose-logging: false
 
+ban-message: |-
+  &c&lYOU ARE BANNED
+
+  &7Reason: &f%reason%
+  &7Duration: &f%duration%
+  &7Time remaining: &f%time_remaining%
+  &7Ban ID: &f%ban_id%
+
+  &7Appeal at &fhttps://dc.cloudmc.lol/
+
 punishments:
+  new-player-balances:
+    coins: 50
+    money: 5000
   Krypton:
     BanTime: lifetime
     ResetData: true

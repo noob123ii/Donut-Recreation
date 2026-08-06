@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -49,6 +50,7 @@ public class SusCommand implements CommandExecutor, Listener {
 
   private final ConcurrentMap<UUID, Integer> viewPage = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Long> lastUse = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, UUID> spectatePairs = new ConcurrentHashMap<>();
 
   @SuppressFBWarnings(
       value = "EI_EXPOSE_REP2",
@@ -61,9 +63,39 @@ public class SusCommand implements CommandExecutor, Listener {
     this.nextKey = new NamespacedKey(plugin, "ac_next");
   }
 
+  public void start() {
+    Bukkit.getScheduler().runTaskTimer(plugin, this::tickLeash, 20L, 10L);
+  }
+
+  private void tickLeash() {
+    if (spectatePairs.isEmpty()) {
+      return;
+    }
+    for (Map.Entry<UUID, UUID> entry : spectatePairs.entrySet()) {
+      UUID viewerId = entry.getKey();
+      UUID targetId = entry.getValue();
+      Player viewer = Bukkit.getPlayer(viewerId);
+      if (viewer == null || !viewer.isOnline() || viewer.getGameMode() != GameMode.SPECTATOR) {
+        spectatePairs.remove(viewerId);
+        continue;
+      }
+      Player target = Bukkit.getPlayer(targetId);
+      if (target == null || !target.isOnline()) {
+        continue;
+      }
+      if (!viewer.getWorld().equals(target.getWorld())
+          || viewer.getLocation().distanceSquared(target.getLocation()) > 100.0 * 100.0) {
+        viewer.teleport(target.getLocation());
+        viewer.setSpectatorTarget(target);
+        viewer.sendMessage(plugin.color(
+            "&c" + target.getName() + " &7tried to run away - you were re-teleported."));
+      }
+    }
+  }
+
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
@@ -186,6 +218,7 @@ public class SusCommand implements CommandExecutor, Listener {
     viewer.setGameMode(GameMode.SPECTATOR);
     viewer.teleport(target.getLocation());
     viewer.setSpectatorTarget(target);
+    spectatePairs.put(viewer.getUniqueId(), target.getUniqueId());
     viewer.sendMessage(plugin.color("&aNow spectating &f" + target.getName() + "&a."));
   }
 

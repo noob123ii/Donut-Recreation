@@ -4,13 +4,15 @@ import com.destroystokyo.paper.profile.PlayerProfile;
 import com.notlucy.donutrecreation.DonutRecreation;
 import com.notlucy.donutrecreation.punish.store.PlayerDataStore;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
@@ -39,7 +41,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
 
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
@@ -72,16 +74,20 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     Date expiry = parseTime(banTime);
 
     OfflinePlayer target = Bukkit.getOfflinePlayer(targetName);
-    String banMsg = "Punished: " + key + " (" + banTime + ")";
     final String displayName = target.getName() != null ? target.getName() : targetName;
 
-    Instant expiryInstant = expiry == null ? null : expiry.toInstant();
-    PlayerProfile profile = Bukkit.createProfile(
-        target.getUniqueId(),
-        target.getName() != null ? target.getName() : targetName);
+    UUID targetId = resolveUuid(targetName, target);
+    if (targetId == null) {
+      sender.sendMessage(plugin.color("&cCould not resolve &f" + targetName + "&c. Try again or use the full name."));
+      return true;
+    }
+
+    PlayerProfile profile = Bukkit.createProfile(targetId, displayName);
     @SuppressWarnings("deprecation")
     BanList<PlayerProfile> banList = Bukkit.getBanList(BanList.Type.PROFILE);
-    banList.addBan(profile, banMsg, expiryInstant, sender.getName());
+    if (banList.isBanned(profile)) {
+      banList.pardon(profile);
+    }
 
     Player online = target.isOnline() ? target.getPlayer() : null;
     String ip = null;
@@ -90,30 +96,35 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
       if (address != null && address.getAddress() != null) {
         ip = address.getAddress().getHostAddress();
       }
-      if (resetData) {
-        wipe(online);
-      }
-      online.kickPlayer(plugin.color("&c" + banMsg));
-    } else if (resetData && target.hasPlayedBefore()) {
-      sender.sendMessage(plugin.color(
-          "&7Player is offline; data wipe will only run if they rejoin briefly."));
     }
     if (ip == null && store != null) {
       ip = store.lastIpFor(target.getUniqueId());
     }
+
+    long expiresAt = expiry == null ? -1L : expiry.getTime();
+    String banId = store != null ? store.generateBanId() : "?";
+    PlayerDataStore.BanRecord banRecord = new PlayerDataStore.BanRecord(
+        banId,
+        targetId,
+        displayName,
+        ip,
+        key,
+        banTime,
+        System.currentTimeMillis(),
+        expiresAt,
+        false);
     if (store != null) {
-      long expiresAt = expiry == null ? -1L : expiry.getTime();
-      String banId = store.generateBanId();
-      store.recordBan(new PlayerDataStore.BanRecord(
-          banId,
-          target.getUniqueId(),
-          displayName,
-          ip,
-          key,
-          banTime,
-          System.currentTimeMillis(),
-          expiresAt,
-          false));
+      store.recordBan(banRecord);
+    }
+
+    if (online != null) {
+      if (resetData) {
+        wipe(online);
+      }
+      online.kickPlayer(plugin.banScreenMessage(banRecord));
+    } else if (resetData && target.hasPlayedBefore()) {
+      sender.sendMessage(plugin.color(
+          "&7Player is offline; data wipe will only run if they rejoin briefly."));
     }
 
     plugin.susFlagManager().clear(target.getUniqueId());
@@ -124,29 +135,30 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
       if (muteMs > 0) {
         try {
           net.luckperms.api.LuckPerms lp = net.luckperms.api.LuckPermsProvider.get();
-          net.luckperms.api.model.user.User user = lp.getUserManager().getUser(target.getUniqueId());
+          net.luckperms.api.model.user.User user = lp.getUserManager().getUser(targetId);
           if (user != null) {
             user.data().add(net.luckperms.api.node.types.PermissionNode.builder("luckperms.chat.mute").build());
             lp.getUserManager().saveUser(user);
             long muteMinutes = muteMs / 60_000L;
             Bukkit.getScheduler().runTaskLater(plugin, () -> {
               try {
-                net.luckperms.api.model.user.User u = lp.getUserManager().getUser(target.getUniqueId());
+                net.luckperms.api.model.user.User u = lp.getUserManager().getUser(targetId);
                 if (u != null) {
                   u.data().remove(net.luckperms.api.node.types.PermissionNode.builder("luckperms.chat.mute").build());
                   lp.getUserManager().saveUser(u);
                 }
               } catch (Throwable ignored) { }
             }, muteMs / 50L);
-            plugin.getLogger().info("[offend] Muted " + target.getName() + " for " + muteMinutes + "m");
+            plugin.getLogger().info("[offend] Muted " + displayName + " for " + muteMinutes + "m");
           }
         } catch (Throwable e) {
-          plugin.getLogger().warning("[offend] Failed to mute " + target.getName() + ": " + e.getMessage());
+          plugin.getLogger().warning("[offend] Failed to mute " + displayName + ": " + e.getMessage());
         }
       }
     }
 
-    String banIdStr = store != null ? store.lastBanFor(target.getUniqueId()).banId : "?";
+    String banIdStr = store != null && store.lastBanFor(targetId) != null
+        ? store.lastBanFor(targetId).banId : "?";
     Bukkit.getOnlinePlayers().stream()
         .filter(p -> p.hasPermission("donutrecreation.*"))
         .forEach(op -> op.sendMessage(plugin.color(
@@ -162,7 +174,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
   @Override
   public List<String> onTabComplete(
       CommandSender sender, Command command, String alias, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       return Collections.emptyList();
     }
     if (args.length == 1) {
@@ -194,6 +206,20 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
       return Collections.emptyList();
     }
     return new ArrayList<>(root.getKeys(false));
+  }
+
+  private UUID resolveUuid(String name, OfflinePlayer fallback) {
+    Player online = Bukkit.getPlayerExact(name);
+    if (online != null) {
+      return online.getUniqueId();
+    }
+    if (store != null) {
+      UUID fromStore = store.findUuidByName(name);
+      if (fromStore != null) {
+        return fromStore;
+      }
+    }
+    return fallback.getUniqueId();
   }
 
   private String matchKey(String input) {
@@ -272,6 +298,29 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
   }
 
   private void wipe(Player target) {
+    if (store != null && !store.hasWipeSnapshot(target.getUniqueId())) {
+      try {
+        store.saveWipeSnapshot(target.getUniqueId(),
+            PlayerDataStore.WipeSnapshot.capture(target));
+        plugin.getLogger().info("[offend] Saved data snapshot for " + target.getName());
+      } catch (Throwable e) {
+        plugin.getLogger().warning("[offend] Failed to snapshot " + target.getName()
+            + ": " + e.getMessage());
+      }
+    }
+    Map<String, Double> newPlayerBalances = new LinkedHashMap<>();
+    ConfigurationSection balances = plugin.getConfig()
+        .getConfigurationSection("punishments.new-player-balances");
+    if (balances != null) {
+      for (String currency : balances.getKeys(false)) {
+        newPlayerBalances.put(currency, balances.getDouble(currency, 0.0));
+      }
+    } else {
+      newPlayerBalances.put("coins", 50.0);
+      newPlayerBalances.put("money", 5000.0);
+    }
+    com.notlucy.donutrecreation.punish.economy.CoinsEngineHook.resetToNewPlayer(target, newPlayerBalances);
+    com.notlucy.donutrecreation.punish.economy.VariableEnderChestsHook.clear(target);
     target.getInventory().clear();
     target.getInventory().setArmorContents(new ItemStack[4]);
     target.getEnderChest().clear();

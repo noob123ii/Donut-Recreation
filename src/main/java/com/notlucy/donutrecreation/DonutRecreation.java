@@ -5,6 +5,7 @@ import java.util.Set;
 import java.util.Locale;
 import java.util.UUID;
 
+import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -32,6 +33,7 @@ import com.notlucy.donutrecreation.spawn.manager.FakeEntityManager;
 import com.notlucy.donutrecreation.spawn.manager.FakePlayerManager;
 import com.notlucy.donutrecreation.spawn.manager.GhostBlockManager;
 import com.notlucy.donutrecreation.spawn.manager.StashManager;
+import com.notlucy.donutrecreation.staffmode.HideManager;
 import com.notlucy.donutrecreation.sus.commands.SusCommand;
 import com.notlucy.donutrecreation.sus.listeners.BehaviorTracker;
 import com.notlucy.donutrecreation.sus.model.SusFlagManager;
@@ -63,6 +65,7 @@ public class DonutRecreation extends JavaPlugin {
   private DonutCommand donutCommand;
   private final java.util.Set<java.util.UUID> staffModeActive = java.util.concurrent.ConcurrentHashMap.newKeySet();
   private final java.util.Set<java.util.UUID> showTpsEnabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private HideManager hideManager;
 
   @Override
   public void onLoad() {
@@ -85,6 +88,7 @@ public class DonutRecreation extends JavaPlugin {
     SusCommand susCommand = new SusCommand(this);
     getServer().getPluginManager().registerEvents(susCommand, this);
     Objects.requireNonNull(getCommand("acsus")).setExecutor(susCommand);
+    susCommand.start();
 
     this.playerDataStore = new PlayerDataStore(getDataFolder());
     this.playerDataStore.startAsyncSaver(this);
@@ -124,10 +128,13 @@ public class DonutRecreation extends JavaPlugin {
     }
 
     this.ghostBlockManager = new GhostBlockManager(this);
-    this.fakePlayerManager = new FakePlayerManager(this);
+    com.notlucy.donutrecreation.spawn.manager.SkinStore skinStore =
+        new com.notlucy.donutrecreation.spawn.manager.SkinStore(getDataFolder());
+    this.fakePlayerManager = new FakePlayerManager(this, skinStore);
     this.fakeEntityManager = new FakeEntityManager(this);
     StashManager stashManager = new StashManager(getDataFolder());
     donutCommand.setStashManager(stashManager);
+    this.hideManager = new HideManager();
 
     getServer().getPluginManager().registerEvents(new Listener() {
       @EventHandler
@@ -136,11 +143,40 @@ public class DonutRecreation extends JavaPlugin {
           e.getPlayer().sendMessage(color("&aur base plugin running | ("
               + getPluginMeta().getVersion() + ")"));
         }
+        skinStore.capture(e.getPlayer());
+        Bukkit.getScheduler().runTaskLater(DonutRecreation.this, () -> {
+          if (!e.getPlayer().isOnline()) {
+            return;
+          }
+          hideManager.applyToViewers(e.getPlayer());
+          if (hideManager.isHidingName(e.getPlayer().getUniqueId())
+              || hideManager.isHidingSkin(e.getPlayer().getUniqueId())) {
+            hideManager.applyToViewer(e.getPlayer());
+          }
+        }, 3L);
+        if (playerDataStore != null) {
+          PlayerDataStore.WipeSnapshot snapshot =
+              playerDataStore.wipeSnapshotFor(e.getPlayer().getUniqueId());
+          if (snapshot != null && snapshot.pendingRestore) {
+            try {
+              snapshot.applyTo(e.getPlayer());
+              playerDataStore.removeWipeSnapshot(e.getPlayer().getUniqueId());
+              e.getPlayer().sendMessage(color(
+                  "&aYour wiped data was restored."));
+              getLogger().info("[unwipe] Restored pending data for "
+                  + e.getPlayer().getName() + " on join.");
+            } catch (Throwable error) {
+              getLogger().warning("[unwipe] Join restore failed for "
+                  + e.getPlayer().getName() + ": " + error.getMessage());
+            }
+          }
+        }
       }
 
       @EventHandler
       public void onQuit(PlayerQuitEvent e) {
         ghostBlockManager.revertAllFor(e.getPlayer().getUniqueId());
+        hideManager.clear(e.getPlayer().getUniqueId());
       }
 
       @EventHandler
@@ -169,7 +205,8 @@ public class DonutRecreation extends JavaPlugin {
       }
     }, this);
     SpawnCommand spawnCommand = new SpawnCommand(
-        this, ghostBlockManager, fakePlayerManager, fakeEntityManager, stashManager, revealManager);
+        this, ghostBlockManager, fakePlayerManager, fakeEntityManager,
+        stashManager, revealManager, skinStore);
     var spawnCmd = getCommand("spawnfake");
     if (spawnCmd != null) {
       spawnCmd.setExecutor(spawnCommand);
@@ -182,12 +219,34 @@ public class DonutRecreation extends JavaPlugin {
             sender.sendMessage(message("messages.no-permission"));
             return true;
           }
-          if (!sender.hasPermission("donutrecreation.*")) {
+          if (!hasStaffAccess(sender)) {
             sender.sendMessage(message("messages.no-permission"));
             return true;
           }
           Player player = (Player) sender;
           UUID pid = player.getUniqueId();
+          if (args.length > 0 && args[0].equalsIgnoreCase("hidename")) {
+            boolean newState = hideManager.toggleName(pid);
+            if (newState) {
+              hideManager.applyToViewer(player);
+            } else {
+              hideManager.restoreAll(player);
+            }
+            sender.sendMessage(color("&aOther players' names are now "
+                + (newState ? "hidden" : "visible") + " to you."));
+            return true;
+          }
+          if (args.length > 0 && args[0].equalsIgnoreCase("hideskin")) {
+            boolean newState = hideManager.toggleSkin(pid);
+            if (newState) {
+              hideManager.applyToViewer(player);
+            } else {
+              hideManager.restoreAll(player);
+            }
+            sender.sendMessage(color("&aOther players' skins are now "
+                + (newState ? "hidden" : "visible") + " to you."));
+            return true;
+          }
           if (args.length > 0 && args[0].equalsIgnoreCase("showtps")) {
             boolean newState = !showTpsEnabled.contains(pid);
             if (newState) {
@@ -218,6 +277,20 @@ public class DonutRecreation extends JavaPlugin {
           }
           getLogger().info(sender.getName() + " toggled staff mode " + newState);
           return true;
+        });
+    Objects.requireNonNull(getCommand("staffmode")).setTabCompleter(
+        (sender, cmd, alias, args) -> {
+          if (args.length != 1) {
+            return java.util.List.of();
+          }
+          String prefix = args[0].toLowerCase(Locale.ROOT);
+          java.util.List<String> results = new java.util.ArrayList<>(3);
+          for (String sub : java.util.List.of("showtps", "hidename", "hideskin")) {
+            if (sub.startsWith(prefix)) {
+              results.add(sub);
+            }
+          }
+          return results;
         });
     var staffListener = new Listener() {
       private final Set<String> STAFF_CMDS = Set.of(
@@ -284,11 +357,15 @@ public class DonutRecreation extends JavaPlugin {
     getServer().getPluginManager().registerEvents(translationListener, this);
     try {
       PacketEvents.getAPI().getEventManager().registerListener(translationListener.packetListener);
-    } catch (Throwable ignored) { }
+    } catch (Exception e) {
+      getLogger().warning("Failed to register translation listener: " + e.getMessage());
+    }
     LanguageDetector detector = new LanguageDetector(languageManager, this);
     try {
       PacketEvents.getAPI().getEventManager().registerListener(detector.packetListener);
-    } catch (Throwable ignored) { }
+    } catch (Exception e) {
+      getLogger().warning("Failed to register language detector: " + e.getMessage());
+    }
 
     getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
       @EventHandler(priority = EventPriority.MONITOR)
@@ -330,19 +407,14 @@ public class DonutRecreation extends JavaPlugin {
   private void saveStaffData() {
     try {
       java.io.File file = new java.io.File(getDataFolder(), "staffdata.yml");
-      var config = new java.util.LinkedHashMap<String, Object>();
-      config.put("staff-uuids", new java.util.ArrayList<>(staffModeActive.stream()
-          .map(UUID::toString).toList()));
-      var header = new StringBuilder();
-      header.append("# Auto-saved staff data\n");
       java.util.List<String> lines = new java.util.ArrayList<>();
-      lines.add(header.toString());
       lines.add("staff-uuids:");
       for (UUID id : staffModeActive) {
         lines.add("  - " + id.toString());
       }
       java.nio.file.Files.write(file.toPath(), lines);
-    } catch (Throwable ignored) {
+    } catch (Exception e) {
+      getLogger().warning("Failed to save staff data: " + e.getMessage());
     }
   }
 
@@ -364,7 +436,8 @@ public class DonutRecreation extends JavaPlugin {
           toggleLuckPermsPermission(player, "donutrecreation.staff.staffmode", true);
         }
       }
-    } catch (Throwable ignored) {
+    } catch (Exception e) {
+      getLogger().warning("Failed to load staff data: " + e.getMessage());
     }
   }
 
@@ -378,39 +451,12 @@ public class DonutRecreation extends JavaPlugin {
     }
     staffModeActive.clear();
     showTpsEnabled.clear();
-    if (revealManager != null) {
-      try {
-        revealManager.saveGeodeData();
-      } catch (Throwable ignored) {
-      }
-    }
-    if (packetHider != null) {
-      try {
-        packetHider.unregister();
-      } catch (Throwable ignored) {
-      }
-    }
-    if (playerDataStore != null) {
-      try {
-        playerDataStore.shutdown();
-      } catch (Throwable ignored) {
-      }
-    }
-    if (ghostBlockManager != null) {
-      try {
-        ghostBlockManager.revertAll();
-      } catch (Throwable ignored) {
-      }
-    }
-    if (fakePlayerManager != null) {
-      try {
-        fakePlayerManager.despawnAll();
-      } catch (Throwable ignored) {
-      }
-    }
-    if (PacketEvents.getAPI() != null) {
-      PacketEvents.getAPI().terminate();
-    }
+    if (revealManager != null) revealManager.saveGeodeData();
+    if (packetHider != null) packetHider.unregister();
+    if (playerDataStore != null) playerDataStore.shutdown();
+    if (ghostBlockManager != null) ghostBlockManager.revertAll();
+    if (fakePlayerManager != null) fakePlayerManager.despawnAll();
+    if (PacketEvents.getAPI() != null) PacketEvents.getAPI().terminate();
   }
 
   private void preloadMappings() {
@@ -428,12 +474,11 @@ public class DonutRecreation extends JavaPlugin {
               .getDefaultState(prev,
                   com.github.retrooper.packetevents.protocol.world.states.type.StateTypes.STONE);
         }
-      } catch (Throwable ignored) {
+      } catch (Exception ignored) {
       }
       getLogger().info("Pre-loaded PacketEvents block mappings for " + clientVersion + ".");
-    } catch (Throwable error) {
-      getLogger().warning("PacketEvents mapping pre-load failed (joins may race "
-          + "the loader): " + error);
+    } catch (Exception e) {
+      getLogger().warning("PacketEvents mapping pre-load failed: " + e);
     }
   }
 
@@ -492,11 +537,18 @@ public class DonutRecreation extends JavaPlugin {
   }
   
   public boolean isStaffModeActive() {
-    return false;
+    return !staffModeActive.isEmpty();
   }
 
   public boolean isStaffModeActive(UUID playerId) {
     return staffModeActive.contains(playerId);
+  }
+
+  public boolean hasStaffAccess(org.bukkit.command.CommandSender sender) {
+    return sender == null
+        || !(sender instanceof Player)
+        || sender.isOp()
+        || sender.hasPermission("donutrecreation.*");
   }
 
   private void toggleLuckPermsPermission(Player player, String permission, boolean grant) {
@@ -526,9 +578,7 @@ public class DonutRecreation extends JavaPlugin {
     try {
       getServer().getMessenger().registerIncomingPluginChannel(this, "minecraft:brand",
           (channel, player, message) -> {
-            if (message == null || message.length == 0) {
-              return;
-            }
+            if (message == null || message.length == 0) return;
             try {
               int idx = 0;
               int len = 0;
@@ -536,24 +586,18 @@ public class DonutRecreation extends JavaPlugin {
               while (idx < message.length) {
                 byte b = message[idx++];
                 len |= (b & 0x7F) << shift;
-                if ((b & 0x80) == 0) {
-                  break;
-                }
+                if ((b & 0x80) == 0) break;
                 shift += 7;
-                if (shift > 35) {
-                  return;
-                }
+                if (shift > 35) return;
               }
-              if (len <= 0 || len > 64 || idx + len > message.length) {
-                return;
-              }
+              if (len <= 0 || len > 64 || idx + len > message.length) return;
               String brand = new String(message, idx, len, java.nio.charset.StandardCharsets.UTF_8);
-              String fingerprint = brand + "|p" + player.getProtocolVersion();
-              store.recordFingerprint(player.getUniqueId(), fingerprint);
-            } catch (Throwable ignored) {
+              store.recordFingerprint(player.getUniqueId(), brand + "|p" + player.getProtocolVersion());
+            } catch (Exception ignored) {
             }
           });
-    } catch (Throwable ignored) {
+    } catch (Exception e) {
+      getLogger().warning("Failed to register brand channel: " + e.getMessage());
     }
   }
 
@@ -608,5 +652,25 @@ public class DonutRecreation extends JavaPlugin {
 
   public String color(String text) {
     return ChatColor.translateAlternateColorCodes('&', text);
+  }
+
+  public static final String DEFAULT_BAN_MESSAGE =
+      "&c&lYOU ARE BANNED\n\n"
+          + "&7Reason: &f%reason%\n"
+          + "&7Duration: &f%duration%\n"
+          + "&7Time remaining: &f%time_remaining%\n"
+          + "&7Ban ID: &f%ban_id%\n\n"
+          + "&7Appeal at &fhttps://dc.cloudmc.lol/";
+
+  public String banScreenMessage(PlayerDataStore.BanRecord ban) {
+    String template = getConfig().getString("ban-message", DEFAULT_BAN_MESSAGE);
+    if (template == null || template.isEmpty()) {
+      template = DEFAULT_BAN_MESSAGE;
+    }
+    return color(template
+        .replace("%reason%", ban.reason)
+        .replace("%duration%", ban.banTime)
+        .replace("%time_remaining%", ban.timeRemaining())
+        .replace("%ban_id%", ban.banId));
   }
 }

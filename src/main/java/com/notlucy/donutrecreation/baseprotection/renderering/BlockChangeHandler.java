@@ -32,7 +32,6 @@ public final class BlockChangeHandler {
       return true;
     }
     if (deepslate.rewriteBlockChange(wrapper, player, x, y, z)
-        || deepslate.maskTileBlockChange(wrapper, player, x, y, z)
         || amethyst.rewriteBlockChange(wrapper, player, x, y, z)) {
       event.markForReEncode(true);
       return true;

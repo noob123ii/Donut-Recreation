@@ -102,6 +102,9 @@ public final class AmethystProtection {
     int newId = state == null ? -1 : state.getGlobalId();
     boolean nowAmethyst = ids.isAmethyst(newId);
 
+    if (rm.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
+      return false;
+    }
     long packed = RevealManager.packPos(x, y, z);
     Set<Long> positions = rm.geodePositions(RevealManager.chunkKey(x >> 4, z >> 4));
     boolean wasAmethyst = positions != null && positions.contains(packed);
@@ -139,6 +142,9 @@ public final class AmethystProtection {
 
       int bx = enc.getX();
       int bz = enc.getZ();
+      if (rm.hasGhostBlockAt(player.getUniqueId(), bx, by, bz)) {
+        continue;
+      }
       int blockId = enc.getBlockId();
       boolean nowAmethyst = ids.isAmethyst(blockId);
       long packed = RevealManager.packPos(bx, by, bz);

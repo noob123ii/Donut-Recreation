@@ -10,6 +10,7 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -102,6 +103,92 @@ public final class PlayerDataStore {
     }
   }
 
+  public static final class WipeSnapshot {
+    public final String name;
+    public final List<org.bukkit.inventory.ItemStack> inventory;
+    public final List<org.bukkit.inventory.ItemStack> armor;
+    public final List<org.bukkit.inventory.ItemStack> offhand;
+    public final List<org.bukkit.inventory.ItemStack> enderChest;
+    public final List<org.bukkit.inventory.ItemStack> variableEnderChest;
+    public final int level;
+    public final float exp;
+    public final int totalExp;
+    public final Map<String, Double> coins;
+    public final boolean pendingRestore;
+
+    public WipeSnapshot(String name,
+        List<org.bukkit.inventory.ItemStack> inventory,
+        List<org.bukkit.inventory.ItemStack> armor,
+        List<org.bukkit.inventory.ItemStack> offhand,
+        List<org.bukkit.inventory.ItemStack> enderChest,
+        List<org.bukkit.inventory.ItemStack> variableEnderChest,
+        int level, float exp, int totalExp,
+        Map<String, Double> coins, boolean pendingRestore) {
+      this.name = name;
+      this.inventory = inventory;
+      this.armor = armor;
+      this.offhand = offhand;
+      this.enderChest = enderChest;
+      this.variableEnderChest = variableEnderChest;
+      this.level = level;
+      this.exp = exp;
+      this.totalExp = totalExp;
+      this.coins = coins;
+      this.pendingRestore = pendingRestore;
+    }
+
+    public static WipeSnapshot capture(org.bukkit.entity.Player player) {
+      return new WipeSnapshot(
+          player.getName(),
+          copyOf(player.getInventory().getStorageContents()),
+          copyOf(player.getInventory().getArmorContents()),
+          copyOf(player.getInventory().getExtraContents()),
+          copyOf(player.getEnderChest().getContents()),
+          com.notlucy.donutrecreation.punish.economy.VariableEnderChestsHook.contentsOf(player),
+          player.getLevel(),
+          player.getExp(),
+          player.getTotalExperience(),
+          com.notlucy.donutrecreation.punish.economy.CoinsEngineHook.snapshot(player),
+          false);
+    }
+
+    private static List<org.bukkit.inventory.ItemStack> copyOf(org.bukkit.inventory.ItemStack[] items) {
+      List<org.bukkit.inventory.ItemStack> out = new ArrayList<>(items.length);
+      for (org.bukkit.inventory.ItemStack item : items) {
+        out.add(item == null ? null : item.clone());
+      }
+      return out;
+    }
+
+    public void applyTo(org.bukkit.entity.Player player) {
+      player.getInventory().setStorageContents(toArray(inventory, 36));
+      player.getInventory().setArmorContents(toArray(armor, 4));
+      org.bukkit.inventory.ItemStack[] extra = toArray(offhand, 1);
+      if (extra.length > 0) {
+        player.getInventory().setItemInOffHand(
+            extra[0] == null ? null : extra[0]);
+      }
+      player.getEnderChest().setContents(toArray(enderChest, 27));
+      com.notlucy.donutrecreation.punish.economy.VariableEnderChestsHook.restore(player, variableEnderChest);
+      player.setLevel(level);
+      player.setExp(exp);
+      player.setTotalExperience(totalExp);
+      com.notlucy.donutrecreation.punish.economy.CoinsEngineHook.restore(player, coins);
+    }
+
+    private static org.bukkit.inventory.ItemStack[] toArray(
+        List<org.bukkit.inventory.ItemStack> list, int expected) {
+      if (list == null) {
+        return new org.bukkit.inventory.ItemStack[expected];
+      }
+      org.bukkit.inventory.ItemStack[] out = new org.bukkit.inventory.ItemStack[list.size()];
+      for (int i = 0; i < list.size(); i++) {
+        out[i] = list.get(i);
+      }
+      return out;
+    }
+  }
+
   public static final class Profile {
     public volatile String name;
     public volatile String fingerprint;
@@ -120,6 +207,7 @@ public final class PlayerDataStore {
   private final ConcurrentMap<String, BanRecord> banIndex = new ConcurrentHashMap<>();
   private final ConcurrentMap<String, Deque<UUID>> ips = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Profile> profiles = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, WipeSnapshot> wipeSnapshots = new ConcurrentHashMap<>();
   private final Object lock = new Object();
   private volatile boolean dirty = false;
   private volatile int task = -1;
@@ -205,6 +293,7 @@ public final class PlayerDataStore {
     bans.clear();
     ips.clear();
     profiles.clear();
+    wipeSnapshots.clear();
     load();
   }
 
@@ -333,6 +422,18 @@ public final class PlayerDataStore {
     return profiles.get(id);
   }
 
+  public UUID findUuidByName(String name) {
+    if (name == null) return null;
+    String lower = name.toLowerCase(Locale.ROOT);
+    for (var entry : profiles.entrySet()) {
+      Profile p = entry.getValue();
+      if (p.name != null && p.name.equalsIgnoreCase(lower)) {
+        return entry.getKey();
+      }
+    }
+    return null;
+  }
+
   public List<UUID> altsOf(UUID id) {
     Profile profile = profiles.get(id);
     if (profile == null) {
@@ -365,6 +466,44 @@ public final class PlayerDataStore {
   public String lastNameFor(UUID id) {
     Profile profile = profiles.get(id);
     return profile == null ? null : profile.name;
+  }
+
+  public void saveWipeSnapshot(UUID id, WipeSnapshot snapshot) {
+    if (id == null || snapshot == null) {
+      return;
+    }
+    wipeSnapshots.put(id, snapshot);
+    dirty = true;
+  }
+
+  public WipeSnapshot wipeSnapshotFor(UUID id) {
+    return id == null ? null : wipeSnapshots.get(id);
+  }
+
+  public boolean hasWipeSnapshot(UUID id) {
+    return id != null && wipeSnapshots.containsKey(id);
+  }
+
+  public void removeWipeSnapshot(UUID id) {
+    if (id != null && wipeSnapshots.remove(id) != null) {
+      dirty = true;
+    }
+  }
+
+  public void markWipeSnapshotPendingRestore(UUID id) {
+    if (id == null) {
+      return;
+    }
+    WipeSnapshot snapshot = wipeSnapshots.get(id);
+    if (snapshot == null) {
+      return;
+    }
+    wipeSnapshots.put(id, new WipeSnapshot(
+        snapshot.name, snapshot.inventory, snapshot.armor, snapshot.offhand,
+        snapshot.enderChest, snapshot.variableEnderChest,
+        snapshot.level, snapshot.exp, snapshot.totalExp,
+        snapshot.coins, true));
+    dirty = true;
   }
 
   private void load() {
@@ -438,6 +577,72 @@ public final class PlayerDataStore {
         }
       }
     }
+    ConfigurationSection snapSection = yaml.getConfigurationSection("wipesnapshots");
+    if (snapSection != null) {
+      for (String key : snapSection.getKeys(false)) {
+        ConfigurationSection entry = snapSection.getConfigurationSection(key);
+        if (entry == null) {
+          continue;
+        }
+        try {
+          UUID id = UUID.fromString(key);
+          wipeSnapshots.put(id, readSnapshot(entry));
+        } catch (IllegalArgumentException ignored) {
+        }
+      }
+    }
+  }
+
+  private WipeSnapshot readSnapshot(ConfigurationSection entry) {
+    List<org.bukkit.inventory.ItemStack> inventory = readItems(entry, "inventory");
+    List<org.bukkit.inventory.ItemStack> armor = readItems(entry, "armor");
+    List<org.bukkit.inventory.ItemStack> offhand = readItems(entry, "offhand");
+    List<org.bukkit.inventory.ItemStack> enderChest = readItems(entry, "enderchest");
+    Map<String, Double> coins = new LinkedHashMap<>();
+    ConfigurationSection coinSection = entry.getConfigurationSection("coins");
+    if (coinSection != null) {
+      for (String currency : coinSection.getKeys(false)) {
+        coins.put(currency, coinSection.getDouble(currency));
+      }
+    }
+    return new WipeSnapshot(
+        entry.getString("name"),
+        inventory,
+        armor,
+        offhand,
+        enderChest,
+        readItems(entry, "variableenderchest"),
+        entry.getInt("level", 0),
+        (float) entry.getDouble("exp", 0.0),
+        entry.getInt("totalExp", 0),
+        coins,
+        entry.getBoolean("pendingRestore", false));
+  }
+
+  private List<org.bukkit.inventory.ItemStack> readItems(
+      ConfigurationSection entry, String sectionName) {
+    List<org.bukkit.inventory.ItemStack> out = new ArrayList<>();
+    ConfigurationSection section = entry.getConfigurationSection(sectionName);
+    if (section == null) {
+      return out;
+    }
+    for (String slot : section.getKeys(false)) {
+      org.bukkit.inventory.ItemStack item = section.getItemStack(slot);
+      out.add(item);
+    }
+    return out;
+  }
+
+  private void writeItems(ConfigurationSection entry, String sectionName,
+      List<org.bukkit.inventory.ItemStack> items) {
+    ConfigurationSection section = entry.createSection(sectionName);
+    int i = 0;
+    for (org.bukkit.inventory.ItemStack item : items) {
+      if (item != null && item.getType() != org.bukkit.Material.AIR) {
+        section.set(String.valueOf(i), item);
+      }
+      i++;
+    }
   }
 
   private void save() {
@@ -485,6 +690,28 @@ public final class PlayerDataStore {
         ipsOut.put(mapEntry.getKey(), list);
       }
       yaml.createSection("ips", ipsOut);
+
+      ConfigurationSection snapRoot = yaml.createSection("wipesnapshots");
+      for (Map.Entry<UUID, WipeSnapshot> mapEntry : wipeSnapshots.entrySet()) {
+        WipeSnapshot snapshot = mapEntry.getValue();
+        ConfigurationSection entry = snapRoot.createSection(mapEntry.getKey().toString());
+        entry.set("name", snapshot.name);
+        entry.set("level", snapshot.level);
+        entry.set("exp", snapshot.exp);
+        entry.set("totalExp", snapshot.totalExp);
+        entry.set("pendingRestore", snapshot.pendingRestore);
+        writeItems(entry, "inventory", snapshot.inventory);
+        writeItems(entry, "armor", snapshot.armor);
+        writeItems(entry, "offhand", snapshot.offhand);
+        writeItems(entry, "enderchest", snapshot.enderChest);
+        writeItems(entry, "variableenderchest", snapshot.variableEnderChest);
+        if (snapshot.coins != null && !snapshot.coins.isEmpty()) {
+          ConfigurationSection coinSection = entry.createSection("coins");
+          for (Map.Entry<String, Double> coin : snapshot.coins.entrySet()) {
+            coinSection.set(coin.getKey(), coin.getValue());
+          }
+        }
+      }
 
       try {
         File parent = file.getParentFile();

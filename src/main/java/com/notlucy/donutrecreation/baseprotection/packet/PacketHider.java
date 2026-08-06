@@ -1,7 +1,12 @@
 package com.notlucy.donutrecreation.baseprotection.packet;
 
+import java.util.EnumMap;
+import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
 
 import org.bukkit.entity.Player;
 
@@ -9,12 +14,12 @@ import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.event.PacketListenerAbstract;
 import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
-import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
+import com.github.retrooper.packetevents.protocol.entity.type.EntityType;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
+import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateLight;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
 import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection;
@@ -35,32 +40,50 @@ public class PacketHider {
   private final RevealManager rm;
   private final BlockIdRegistry registry;
   private final AtomicInteger failureCount = new AtomicInteger();
+  private final Map<UUID, Map<Integer, PendingSpawn>> pendingSpawns = new ConcurrentHashMap<>();
+  private final Map<PacketType.Play.Server, BiConsumer<PacketSendEvent, Player>> handlers =
+      new EnumMap<>(PacketType.Play.Server.class);
+  private MultiBlockChangeHandler multiBlockChange;
   private PacketListenerAbstract listener;
-
-  private final ChunkDataHandler chunkData;
-  private final UpdateLightHandler updateLight;
-  private final BlockChangeHandler blockChange;
-  private final MultiBlockChangeHandler multiBlockChange;
-  private final BlockEntityDebugProtection tiles;
-  private final SoundDamper sounds;
-  private final ParticleDamper particles;
-  private final ExplosionDamper explosions;
-  private final WorldEffectDamper worldEffects;
 
   public PacketHider(RevealManager revealManager) {
     this.rm = revealManager;
     this.registry = new BlockIdRegistry();
+    rm.setChunkRevealCallback(this::resendSpawnsForChunk);
     DeepslateProtection deepslate = new DeepslateProtection(rm, registry);
     AmethystProtection amethyst = new AmethystProtection(rm, registry);
-    this.chunkData = new ChunkDataHandler(rm, deepslate, amethyst);
-    this.updateLight = new UpdateLightHandler(rm);
-    this.blockChange = new BlockChangeHandler(rm, deepslate, amethyst);
+
+    ChunkDataHandler chunkData = new ChunkDataHandler(rm, deepslate, amethyst);
+    UpdateLightHandler updateLight = new UpdateLightHandler(rm);
+    BlockChangeHandler blockChange = new BlockChangeHandler(rm, deepslate, amethyst);
     this.multiBlockChange = new MultiBlockChangeHandler(rm, deepslate, amethyst);
-    this.tiles = new BlockEntityDebugProtection(rm);
-    this.sounds = new SoundDamper(rm);
-    this.particles = new ParticleDamper(rm);
-    this.explosions = new ExplosionDamper(rm);
-    this.worldEffects = new WorldEffectDamper(rm);
+    BlockEntityDebugProtection tiles = new BlockEntityDebugProtection(rm);
+    SoundDamper sounds = new SoundDamper(rm);
+    ParticleDamper particles = new ParticleDamper(rm);
+    ExplosionDamper explosions = new ExplosionDamper(rm);
+    WorldEffectDamper worldEffects = new WorldEffectDamper(rm);
+
+    registerHandler(PacketType.Play.Server.CHUNK_DATA, chunkData::handle);
+    registerHandler(PacketType.Play.Server.UPDATE_LIGHT, updateLight::handle);
+    registerHandler(PacketType.Play.Server.MULTI_BLOCK_CHANGE, multiBlockChange::handle);
+    registerHandler(PacketType.Play.Server.BLOCK_CHANGE, blockChange::handle);
+    registerHandler(PacketType.Play.Server.BLOCK_ENTITY_DATA, tiles::handleBlockEntityData);
+    registerHandler(PacketType.Play.Server.BLOCK_ACTION, this::handleBlockAction);
+    registerHandler(PacketType.Play.Server.UNLOAD_CHUNK, this::handleUnloadChunk);
+    registerHandler(PacketType.Play.Server.SPAWN_ENTITY, this::handleSpawnEntity);
+    registerHandler(PacketType.Play.Server.ENTITY_RELATIVE_MOVE, this::handleEntityMove);
+    registerHandler(PacketType.Play.Server.ENTITY_RELATIVE_MOVE_AND_ROTATION, this::handleEntityMove);
+    registerHandler(PacketType.Play.Server.ENTITY_TELEPORT, this::handleEntityMove);
+    registerHandler(PacketType.Play.Server.SOUND_EFFECT, sounds::handle);
+    registerHandler(PacketType.Play.Server.ENTITY_SOUND_EFFECT, sounds::handle);
+    registerHandler(PacketType.Play.Server.PARTICLE, particles::handle);
+    registerHandler(PacketType.Play.Server.EXPLOSION, explosions::handle);
+    registerHandler(PacketType.Play.Server.EFFECT, worldEffects::handle);
+    registerHandler(PacketType.Play.Server.BLOCK_BREAK_ANIMATION, worldEffects::handle);
+  }
+
+  private void registerHandler(PacketType.Play.Server type, BiConsumer<PacketSendEvent, Player> handler) {
+    handlers.put(type, handler);
   }
 
   public void register() {
@@ -80,6 +103,7 @@ public class PacketHider {
 
   public void clearPlayer(UUID playerId) {
     rm.clearEntityVisibility(playerId);
+    pendingSpawns.remove(playerId);
   }
 
   public void reload() {
@@ -93,6 +117,31 @@ public class PacketHider {
     this.multiBlockChange.setGhostBlockManager(gbm);
   }
 
+  private static final class PendingSpawn {
+    final int entityId;
+    final Optional<UUID> uuid;
+    final EntityType type;
+    final Vector3d pos;
+    final float pitch;
+    final float yaw;
+    final float headYaw;
+    final int data;
+    final Optional<Vector3d> velocity;
+
+    PendingSpawn(int entityId, Optional<UUID> uuid, EntityType type, Vector3d pos,
+        float pitch, float yaw, float headYaw, int data, Optional<Vector3d> velocity) {
+      this.entityId = entityId;
+      this.uuid = uuid;
+      this.type = type;
+      this.pos = pos;
+      this.pitch = pitch;
+      this.yaw = yaw;
+      this.headYaw = headYaw;
+      this.data = data;
+      this.velocity = velocity;
+    }
+  }
+
   private final class Listener extends PacketListenerAbstract {
     Listener() {
       super(PacketListenerPriority.MONITOR);
@@ -104,26 +153,9 @@ public class PacketHider {
         return;
       }
       try {
-        switch (event.getPacketType()) {
-          case PacketType.Play.Server.CHUNK_DATA -> chunkData.handle(event, player);
-          case PacketType.Play.Server.UPDATE_LIGHT -> updateLight.handle(event, player);
-          case PacketType.Play.Server.UNLOAD_CHUNK -> handleUnloadChunk(event, player);
-          case PacketType.Play.Server.BLOCK_CHANGE -> blockChange.handle(event, player);
-          case PacketType.Play.Server.MULTI_BLOCK_CHANGE -> multiBlockChange.handle(event, player);
-          case PacketType.Play.Server.BLOCK_ENTITY_DATA -> tiles.handleBlockEntityData(event, player);
-          case PacketType.Play.Server.SPAWN_ENTITY -> handleSpawnEntity(event, player);
-          case PacketType.Play.Server.SOUND_EFFECT,
-               PacketType.Play.Server.ENTITY_SOUND_EFFECT -> sounds.handle(event, player);
-          case PacketType.Play.Server.PARTICLE -> particles.handle(event, player);
-          case PacketType.Play.Server.EXPLOSION -> explosions.handle(event, player);
-          case PacketType.Play.Server.EFFECT,
-               PacketType.Play.Server.BLOCK_BREAK_ANIMATION -> worldEffects.handle(event, player);
-          case PacketType.Play.Server.ENTITY_RELATIVE_MOVE,
-               PacketType.Play.Server.ENTITY_TELEPORT -> handleEntityMove(event, player);
-          case PacketType.Play.Server.ENTITY_EQUIPMENT,
-               PacketType.Play.Server.ENTITY_METADATA -> handlePositionalCancel(event, player);
-          case PacketType.Play.Server.BLOCK_ACTION -> handleBlockAction(event, player);
-          default -> {}
+        var handler = handlers.get(event.getPacketType());
+        if (handler != null) {
+          handler.accept(event, player);
         }
       } catch (Throwable error) {
         if (failureCount.incrementAndGet() <= 8) {
@@ -148,8 +180,30 @@ public class PacketHider {
       int cz = (int) Math.floor(pos.getZ()) >> 4;
       if (!rm.isRevealed(player, cx, cz)) {
         event.setCancelled(true);
+        pendingSpawns.computeIfAbsent(player.getUniqueId(), k -> new ConcurrentHashMap<>())
+            .put(w.getEntityId(), new PendingSpawn(
+                w.getEntityId(), w.getUUID(), type, pos,
+                w.getPitch(), w.getYaw(), w.getHeadYaw(), w.getData(), w.getVelocity()));
       }
     }
+  }
+
+  private void resendSpawnsForChunk(Player viewer, int chunkX, int chunkZ) {
+    Map<Integer, PendingSpawn> map = pendingSpawns.get(viewer.getUniqueId());
+    if (map == null || map.isEmpty()) return;
+    map.entrySet().removeIf(entry -> {
+      PendingSpawn s = entry.getValue();
+      if (((int) Math.floor(s.pos.getX()) >> 4) != chunkX
+          || ((int) Math.floor(s.pos.getZ()) >> 4) != chunkZ) {
+        return false;
+      }
+      try {
+        PacketEvents.getAPI().getPlayerManager().sendPacket(viewer,
+            new WrapperPlayServerSpawnEntity(
+                s.entityId, s.uuid, s.type, s.pos, s.pitch, s.yaw, s.headYaw, s.data, s.velocity));
+      } catch (Throwable ignored) { }
+      return true;
+    });
   }
 
   private void handleEntityMove(PacketSendEvent event, Player player) {
@@ -162,13 +216,6 @@ public class PacketHider {
         event.setCancelled(true);
       }
     } catch (Throwable ignored) {
-    }
-  }
-
-  private void handlePositionalCancel(PacketSendEvent event, Player player) {
-    var loc = player.getLocation();
-    if (!rm.isRevealed(player, loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
-      event.setCancelled(true);
     }
   }
 

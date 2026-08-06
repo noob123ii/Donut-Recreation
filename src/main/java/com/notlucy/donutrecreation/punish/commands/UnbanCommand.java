@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 import org.bukkit.BanList;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
@@ -29,7 +30,7 @@ public class UnbanCommand implements CommandExecutor, TabCompleter {
 
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
@@ -38,29 +39,69 @@ public class UnbanCommand implements CommandExecutor, TabCompleter {
       return true;
     }
     String name = args[0];
-    OfflinePlayer target = Bukkit.getOfflinePlayer(name);
-    String display = target.getName() != null ? target.getName() : name;
 
+    UUID targetId = null;
+
+    Player online = Bukkit.getPlayerExact(name);
+    if (online != null) {
+      targetId = online.getUniqueId();
+    }
+
+    if (targetId == null && store != null) {
+      targetId = store.findUuidByName(name);
+    }
+
+    if (targetId == null) {
+      OfflinePlayer offline = Bukkit.getOfflinePlayer(name);
+      targetId = offline.getUniqueId();
+    }
+
+    String display = name;
     if (store != null) {
-      store.removeBan(target.getUniqueId());
+      store.removeBan(targetId);
+      PlayerDataStore.Profile profile = store.profileOf(targetId);
+      if (profile != null && profile.name != null) {
+        display = profile.name;
+      }
+    }
+
+    boolean pardoned = false;
+    try {
+      PlayerProfile profile = Bukkit.createProfile(targetId, display);
+      @SuppressWarnings("deprecation")
+      BanList<PlayerProfile> profileBanList = Bukkit.getBanList(BanList.Type.PROFILE);
+      if (profileBanList.isBanned(profile)) {
+        profileBanList.pardon(profile);
+        pardoned = true;
+      }
+    } catch (Exception e) {
+      plugin.getLogger().warning("[unban] profile pardon failed for " + display + ": " + e.getMessage());
     }
 
     try {
-      PlayerProfile profile = Bukkit.createProfile(target.getUniqueId(), display);
-      @SuppressWarnings("deprecation")
-      BanList<PlayerProfile> banList = Bukkit.getBanList(BanList.Type.PROFILE);
-      banList.pardon(profile);
-    } catch (Throwable ignored) {
+      @SuppressWarnings({"deprecation", "rawtypes"})
+      BanList nameBanList = Bukkit.getBanList(BanList.Type.NAME);
+      if (nameBanList.isBanned(display)) {
+        nameBanList.pardon(display);
+        pardoned = true;
+      }
+    } catch (Exception e) {
+      plugin.getLogger().warning("[unban] name pardon failed for " + display + ": " + e.getMessage());
+    }
+
+    if (!pardoned) {
+      plugin.getLogger().info("[unban] " + display + " was not in any Bukkit ban list (store ban removed)");
     }
 
     sender.sendMessage(plugin.color("&aUnbanned &f" + display));
+    plugin.getLogger().info("[unban] " + sender.getName() + " unbanned " + display + " (uuid=" + targetId + ")");
     return true;
   }
 
   @Override
   public List<String> onTabComplete(
       CommandSender sender, Command command, String alias, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*") || args.length != 1) {
+    if (!plugin.hasStaffAccess(sender) || args.length != 1) {
       return Collections.emptyList();
     }
     List<String> names = new ArrayList<>();

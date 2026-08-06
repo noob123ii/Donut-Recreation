@@ -57,12 +57,14 @@ public final class RevealListener implements Listener {
   @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = false)
   public void onBlockBreak(BlockBreakEvent event) {
     Block block = event.getBlock();
-    if (block.getType() == org.bukkit.Material.SPAWNER) {
-      event.setCancelled(true);
-      event.getPlayer().sendMessage(rm.plugin().color("&cYou cannot break spawners."));
-      return;
-    }
     Player player = event.getPlayer();
+    if (block.getType() == org.bukkit.Material.SPAWNER) {
+      if (rm.plugin().isStaffModeActive(player.getUniqueId())) {
+        event.setCancelled(true);
+        player.sendMessage(rm.plugin().color("&cYou cannot break spawners while in staff mode."));
+        return;
+      }
+    }
     int by    = block.getY();
     int floor = rm.hideBelowY();
     if (by <= floor) {
@@ -188,7 +190,6 @@ public final class RevealListener implements Listener {
     var to   = event.getTo();
     if (to != null && from.getWorld() != null && to.getWorld() != null
         && !from.getWorld().getUID().equals(to.getWorld().getUID())) {
-      rm.onPlayerChangeWorld(from.getWorld().getUID());
       rm.clearDeliveredChunks(player.getUniqueId());
     }
 

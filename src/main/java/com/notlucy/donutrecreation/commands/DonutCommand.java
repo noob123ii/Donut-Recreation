@@ -43,7 +43,7 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
   @Override
   public boolean onCommand(CommandSender sender, Command command,
                          String label, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
@@ -101,7 +101,7 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
   @Override
   public List<String> onTabComplete(CommandSender sender, Command command,
                                       String alias, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       return Collections.emptyList();
     }
     if (args.length == 1) {

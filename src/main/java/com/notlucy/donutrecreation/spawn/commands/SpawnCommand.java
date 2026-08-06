@@ -48,6 +48,7 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   private final FakeEntityManager fakeEntities;
   private final StashManager stashes;
   private final RevealManager revealManager;
+  private final com.notlucy.donutrecreation.spawn.manager.SkinStore skins;
 
   @SuppressFBWarnings(value = "EI_EXPOSE_REP2",
       justification = "Plugin and managers are shared by Bukkit.")
@@ -56,18 +57,20 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
                        FakePlayerManager npcs,
                        FakeEntityManager fakeEntities,
                        StashManager stashes,
-                       RevealManager revealManager) {
+                       RevealManager revealManager,
+                       com.notlucy.donutrecreation.spawn.manager.SkinStore skins) {
     this.plugin = plugin;
     this.ghosts = ghosts;
     this.npcs = npcs;
     this.fakeEntities = fakeEntities;
     this.stashes = stashes;
     this.revealManager = revealManager;
+    this.skins = skins;
   }
 
   @Override
   public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       sender.sendMessage(plugin.message("messages.no-permission"));
       return true;
     }
@@ -95,7 +98,10 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
       case "bedrockspawner" -> spawnFakeBedrockSpawner(player);
       case "clear" -> {
         ghosts.revertAllFor(player.getUniqueId());
-        player.sendMessage(plugin.color("&aCleared all your spawned ghost blocks."));
+        fakeEntities.despawnAllFor(player);
+        npcs.despawnAll();
+        player.sendMessage(plugin.color(
+            "&aCleared all your spawned ghost blocks, fake players and decoys."));
       }
       default -> player.sendMessage(plugin.color("&cUnknown decoy. Valid: &f"
           + String.join(", ", SUBCOMMANDS)));
@@ -106,7 +112,7 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   @Override
   public List<String> onTabComplete(CommandSender sender, Command command, String alias,
                                      String[] args) {
-    if (!sender.hasPermission("donutrecreation.*")) {
+    if (!plugin.hasStaffAccess(sender)) {
       return List.of();
     }
     if (args.length == 1) {
@@ -195,6 +201,11 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
           "&cFailed to spawn fake player (PacketEvents wrappers unavailable)."));
     }
   }
+
+  private static final int BEDROCK_STYLE_BUD = 0;
+  private static final int BEDROCK_STYLE_SINGLE = 1;
+  private static final int BEDROCK_STYLE_DOUBLE = 2;
+  private static final int BEDROCK_STYLE_AROUND = 3;
 
   private void spawnFakeBedrockSpawner(Player player) {
     Hole hole = findDeepslatePair(player.getLocation(), 32);

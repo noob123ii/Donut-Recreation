@@ -88,13 +88,13 @@ public final class LitematicConverter {
     int sz;
     Object sizeObj = region.get("Size");
     if (sizeObj instanceof int[] arr && arr.length >= 3) {
-      sx = arr[0];
-      sy = arr[1];
-      sz = arr[2];
+      sx = Math.abs(arr[0]);
+      sy = Math.abs(arr[1]);
+      sz = Math.abs(arr[2]);
     } else if (sizeObj instanceof Map<?, ?> m) {
-      sx = ((Number) m.get("x")).intValue();
-      sy = ((Number) m.get("y")).intValue();
-      sz = ((Number) m.get("z")).intValue();
+      sx = Math.abs(((Number) m.get("x")).intValue());
+      sy = Math.abs(((Number) m.get("y")).intValue());
+      sz = Math.abs(((Number) m.get("z")).intValue());
     } else {
       return List.of();
     }
@@ -154,10 +154,27 @@ public final class LitematicConverter {
       return List.of();
     }
 
-    int bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(names.length - 1));
+    int bits;
+    if (names.length == 1) {
+      bits = 0;
+    } else {
+      bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(names.length - 1));
+    }
     long mask = (1L << bits) - 1;
     int total = sx * sy * sz;
     List<StashManager.StashBlock> blocks = new ArrayList<>();
+    if (bits == 0) {
+      BlockData all = parseBlockData(names[0]);
+      if (all != null) {
+        for (int i = 0; i < total; i++) {
+          int bx = i % sx;
+          int bz = (i / sx) % sz;
+          int by = i / (sx * sz);
+          blocks.add(new StashManager.StashBlock(bx + px, (sy - 1 - by) + py, bz + pz, all));
+        }
+      }
+      return blocks;
+    }
     int idx = 0;
     for (int i = 0; i < total && idx < states.length; i++) {
       long state = (states[idx] >>> ((long) (i * bits) % 64)) & mask;
@@ -171,9 +188,6 @@ public final class LitematicConverter {
         continue;
       }
       String mcName = names[(int) state];
-      if (mcName.equals("minecraft:air") || mcName.equals("minecraft:cave_air")) {
-        continue;
-      }
       BlockData data = parseBlockData(mcName);
       if (data == null) {
         continue;
