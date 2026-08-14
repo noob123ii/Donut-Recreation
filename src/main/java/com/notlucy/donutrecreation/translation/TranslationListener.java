@@ -104,7 +104,7 @@ public final class TranslationListener implements Listener {
     Location loc = new Location(viewer.getWorld(), pos.x, pos.y, pos.z);
     if (viewer.getLocation().distanceSquared(loc) > SIGN_RADIUS_SQ) return;
     String viewerLang = lang.getLang(viewer.getUniqueId());
-    if ("en".equals(viewerLang)) return;
+    if (viewerLang == null || viewerLang.startsWith("en")) return;
     NBTCompound nbt = data.getNBT();
     if (nbt == null) return;
     manager.putSignNbt(loc, nbt);
@@ -122,7 +122,7 @@ public final class TranslationListener implements Listener {
 
   public void refreshSigns(Player player) {
     String langCode = lang.getLang(player.getUniqueId());
-    if ("en".equals(langCode)) return;
+    if (langCode == null || langCode.startsWith("en")) return;
     for (var entry : manager.allSignTexts().entrySet()) {
       Location loc = entry.getKey();
       if (!loc.getWorld().equals(player.getWorld())) continue;

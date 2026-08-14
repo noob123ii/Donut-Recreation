@@ -1,19 +1,19 @@
 package com.notlucy.donutrecreation.baseprotection.renderering;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Set;
+import java.util.List;
 
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import com.github.retrooper.packetevents.event.PacketSendEvent;
+import com.github.retrooper.packetevents.protocol.nbt.NBTCompound;
 import com.github.retrooper.packetevents.protocol.world.chunk.Column;
 import com.github.retrooper.packetevents.protocol.world.chunk.TileEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockEntityData;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
+import com.notlucy.donutrecreation.util.LogData;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class BlockEntityDebugProtection {
@@ -42,24 +42,17 @@ public final class BlockEntityDebugProtection {
     return null;
   }
 
-  private static final int PROXIMITY_BLOCKS = 10;
-  private static final Set<Material> RESTRICTED_TILES = Set.of(
-      Material.CHEST, Material.TRAPPED_CHEST, Material.ENDER_CHEST,
-      Material.BARREL, Material.SHULKER_BOX,
-      Material.WHITE_SHULKER_BOX, Material.ORANGE_SHULKER_BOX,
-      Material.MAGENTA_SHULKER_BOX, Material.LIGHT_BLUE_SHULKER_BOX,
-      Material.YELLOW_SHULKER_BOX, Material.LIME_SHULKER_BOX,
-      Material.PINK_SHULKER_BOX, Material.GRAY_SHULKER_BOX,
-      Material.LIGHT_GRAY_SHULKER_BOX, Material.CYAN_SHULKER_BOX,
-      Material.PURPLE_SHULKER_BOX, Material.BLUE_SHULKER_BOX,
-      Material.BROWN_SHULKER_BOX, Material.GREEN_SHULKER_BOX,
-      Material.RED_SHULKER_BOX, Material.BLACK_SHULKER_BOX,
-      Material.SPAWNER);
-
   private final RevealManager rm;
+  private final boolean maskEnabled;
 
   public BlockEntityDebugProtection(RevealManager rm) {
     this.rm = rm;
+    var cfg = rm.plugin().getConfig();
+    this.maskEnabled = cfg.getBoolean("hider.tile-entity-mask-enabled", true);
+  }
+
+  public boolean maskEnabled() {
+    return maskEnabled;
   }
 
   public static void replaceTiles(Column column, TileEntity[] tiles) {
@@ -73,34 +66,46 @@ public final class BlockEntityDebugProtection {
     }
   }
 
-  public static void scrubTilesBelow(Column column, int floorY) {
-    if (TILE_ARRAY_FIELD == null) {
-      warnOnce();
-      return;
+  /**
+   * Removes block entities from a chunk payload for a viewer:
+   *  - tiles below the hide floor are removed unless the chunk is revealed;
+   *  - tiles in the barrier band (floorY..upperY) are removed unless the
+   *    band is revealed for the viewer.
+   * Any region the viewer may legitimately see (surface, revealed
+   * underworld, revealed band) keeps all of its block entities.
+   */
+  public boolean scrubChunk(Column column, Player player, int cx, int cz) {
+    if (!maskEnabled) {
+      return false;
     }
     TileEntity[] tiles = column.getTileEntities();
     if (tiles == null || tiles.length == 0) {
-      return;
+      return false;
     }
+    int floorY = rm.hideBelowY();
 
-    TileEntity[] keep = new TileEntity[tiles.length];
-    int kept = 0;
+    List<TileEntity> keep = new ArrayList<>(tiles.length);
     for (TileEntity t : tiles) {
       if (t == null) {
         continue;
       }
-      if (t.getYShort() >= floorY) {
-        keep[kept++] = t;
+      int y = t.getY();
+      boolean regionVisible = y < floorY
+          ? rm.isRevealed(player, cx, cz)
+          : rm.isUpperRevealed(player, cx, cz);
+      if (!regionVisible) {
+        continue;
       }
+      keep.add(t);
     }
-    if (kept == tiles.length) {
-      return;
+    if (keep.size() == tiles.length) {
+      return false;
     }
-    TileEntity[] result = kept == 0 ? new TileEntity[0] : Arrays.copyOf(keep, kept);
-    try {
-      TILE_ARRAY_FIELD.set(column, result);
-    } catch (IllegalAccessException ignored) {
-    }
+    TileEntity[] result = keep.isEmpty()
+        ? new TileEntity[0]
+        : keep.toArray(new TileEntity[0]);
+    replaceTiles(column, result);
+    return true;
   }
 
   public void handleBlockEntityData(PacketSendEvent event, Player player) {
@@ -113,20 +118,6 @@ public final class BlockEntityDebugProtection {
     if (by < rm.hideBelowY()) {
       if (!rm.isRevealed(player, cx, cz)) {
         event.setCancelled(true);
-        return;
-      }
-    }
-
-    World world = player.getWorld();
-    Material type = world.getBlockAt(pos.getX(), by, pos.getZ()).getType();
-    if (RESTRICTED_TILES.contains(type)) {
-      Location playerLoc = player.getLocation();
-      double dx = pos.getX() + 0.5 - playerLoc.getX();
-      double dy = by + 0.5 - playerLoc.getY();
-      double dz = pos.getZ() + 0.5 - playerLoc.getZ();
-      double distSq = dx * dx + dy * dy + dz * dz;
-      if (distSq > PROXIMITY_BLOCKS * PROXIMITY_BLOCKS) {
-        event.setCancelled(true);
       }
     }
   }
@@ -136,7 +127,7 @@ public final class BlockEntityDebugProtection {
       return;
     }
     reflectionWarned = true;
-    com.notlucy.donutrecreation.util.LogData.get().warning(
+    LogData.get().warning(
         "[hider] Column tile-entity field not found; tile masking disabled "
             + "(PacketEvents API may have changed).");
   }

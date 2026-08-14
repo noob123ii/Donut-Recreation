@@ -1,21 +1,5 @@
 package com.notlucy.donutrecreation;
 
-import java.util.Objects;
-import java.util.Set;
-import java.util.Locale;
-import java.util.UUID;
-
-import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerInteractEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.plugin.java.JavaPlugin;
-
 import com.github.retrooper.packetevents.PacketEvents;
 import com.notlucy.donutrecreation.baseprotection.RevealListener;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
@@ -34,24 +18,38 @@ import com.notlucy.donutrecreation.spawn.manager.FakePlayerManager;
 import com.notlucy.donutrecreation.spawn.manager.GhostBlockManager;
 import com.notlucy.donutrecreation.spawn.manager.StashManager;
 import com.notlucy.donutrecreation.staffmode.HideManager;
+import com.notlucy.donutrecreation.staffmode.TestBotManager;
 import com.notlucy.donutrecreation.sus.commands.SusCommand;
 import com.notlucy.donutrecreation.sus.listeners.BehaviorTracker;
 import com.notlucy.donutrecreation.sus.model.SusFlagManager;
 import com.notlucy.donutrecreation.translation.LanguageDetector;
-import com.notlucy.donutrecreation.translation.MinecraftLanguageLoader;
 import com.notlucy.donutrecreation.translation.LanguageManager;
+import com.notlucy.donutrecreation.translation.MinecraftLanguageLoader;
 import com.notlucy.donutrecreation.translation.TranslationListener;
 import com.notlucy.donutrecreation.translation.TranslationManager;
 import com.notlucy.donutrecreation.util.LogData;
-import java.io.File;
-
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.github.retrooper.packetevents.factory.spigot.SpigotPacketEventsBuilder;
 import io.papermc.lib.PaperLib;
+import java.io.File;
+import java.util.Locale;
+import java.util.Objects;
+import java.util.Set;
+import java.util.UUID;
 import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import net.luckperms.api.model.user.User;
 import net.luckperms.api.node.types.PermissionNode;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.java.JavaPlugin;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public class DonutRecreation extends JavaPlugin {
@@ -65,7 +63,22 @@ public class DonutRecreation extends JavaPlugin {
   private DonutCommand donutCommand;
   private final java.util.Set<java.util.UUID> staffModeActive = java.util.concurrent.ConcurrentHashMap.newKeySet();
   private final java.util.Set<java.util.UUID> showTpsEnabled = java.util.concurrent.ConcurrentHashMap.newKeySet();
+  private final java.util.Map<java.util.UUID, StaffSettings> staffSettings =
+      new java.util.concurrent.ConcurrentHashMap<>();
+
+  private static final class StaffSettings {
+    final boolean showTps;
+    final boolean hideName;
+    final boolean hideSkin;
+
+    StaffSettings(boolean showTps, boolean hideName, boolean hideSkin) {
+      this.showTps = showTps;
+      this.hideName = hideName;
+      this.hideSkin = hideSkin;
+    }
+  }
   private HideManager hideManager;
+  private TestBotManager testBotManager;
 
   @Override
   public void onLoad() {
@@ -132,9 +145,12 @@ public class DonutRecreation extends JavaPlugin {
         new com.notlucy.donutrecreation.spawn.manager.SkinStore(getDataFolder());
     this.fakePlayerManager = new FakePlayerManager(this, skinStore);
     this.fakeEntityManager = new FakeEntityManager(this);
-    StashManager stashManager = new StashManager(getDataFolder());
+    StashManager stashManager = new StashManager(this, getDataFolder());
     donutCommand.setStashManager(stashManager);
     this.hideManager = new HideManager();
+    this.testBotManager = new TestBotManager(fakePlayerManager, hideManager, skinStore);
+    fakePlayerManager.setHideState(testBotManager);
+    hideManager.setBotRespawner(testBotManager::respawnBotFor);
 
     getServer().getPluginManager().registerEvents(new Listener() {
       @EventHandler
@@ -144,6 +160,9 @@ public class DonutRecreation extends JavaPlugin {
               + getPluginMeta().getVersion() + ")"));
         }
         skinStore.capture(e.getPlayer());
+        if (staffModeActive.contains(e.getPlayer().getUniqueId())) {
+          restoreStaffSettings(e.getPlayer());
+        }
         Bukkit.getScheduler().runTaskLater(DonutRecreation.this, () -> {
           if (!e.getPlayer().isOnline()) {
             return;
@@ -230,7 +249,7 @@ public class DonutRecreation extends JavaPlugin {
             if (newState) {
               hideManager.applyToViewer(player);
             } else {
-              hideManager.restoreAll(player);
+              hideManager.restoreAllNames(player);
             }
             sender.sendMessage(color("&aOther players' names are now "
                 + (newState ? "hidden" : "visible") + " to you."));
@@ -241,10 +260,22 @@ public class DonutRecreation extends JavaPlugin {
             if (newState) {
               hideManager.applyToViewer(player);
             } else {
-              hideManager.restoreAll(player);
+              hideManager.restoreAllSkins(player);
             }
             sender.sendMessage(color("&aOther players' skins are now "
                 + (newState ? "hidden" : "visible") + " to you."));
+            return true;
+          }
+          if (args.length > 0 && args[0].equalsIgnoreCase("spawntestbot")) {
+            if (args.length > 1 && args[1].equalsIgnoreCase("clear")) {
+              testBotManager.clearAll();
+              sender.sendMessage(color("&aTest bot despawned."));
+            } else if (testBotManager.spawnTestBot(player)) {
+              sender.sendMessage(color("&aSpawned TestBot next to you. Use "
+                  + "&e/staffmode spawntestbot clear&a to remove it."));
+            } else {
+              sender.sendMessage(color("&cFailed to spawn test bot."));
+            }
             return true;
           }
           if (args.length > 0 && args[0].equalsIgnoreCase("showtps")) {
@@ -263,9 +294,19 @@ public class DonutRecreation extends JavaPlugin {
           boolean newState = !staffModeActive.contains(pid);
           if (newState) {
             staffModeActive.add(pid);
+            restoreStaffSettings(player);
           } else {
+            saveStaffSettings(pid);
             staffModeActive.remove(pid);
             showTpsEnabled.remove(pid);
+            if (hideManager.isHidingName(pid)) {
+              hideManager.setHidingName(pid, false);
+              hideManager.restoreAllNames(player);
+            }
+            if (hideManager.isHidingSkin(pid)) {
+              hideManager.setHidingSkin(pid, false);
+              hideManager.restoreAllSkins(player);
+            }
           }
           toggleLuckPermsPermission(player, "donutrecreation.staff.staffmode", newState);
           saveStaffData();
@@ -285,7 +326,8 @@ public class DonutRecreation extends JavaPlugin {
           }
           String prefix = args[0].toLowerCase(Locale.ROOT);
           java.util.List<String> results = new java.util.ArrayList<>(3);
-          for (String sub : java.util.List.of("showtps", "hidename", "hideskin")) {
+          for (String sub : java.util.List.of("showtps", "hidename", "hideskin",
+              "spawntestbot")) {
             if (sub.startsWith(prefix)) {
               results.add(sub);
             }
@@ -336,6 +378,9 @@ public class DonutRecreation extends JavaPlugin {
     BehaviorTracker behaviorTracker = new BehaviorTracker(this);
     getServer().getPluginManager().registerEvents(behaviorTracker, this);
     behaviorTracker.start();
+
+    getServer().getPluginManager().registerEvents(
+        new com.notlucy.donutrecreation.util.PearlKeeper(), this);
 
     File translationDir = new File(getDataFolder(), "translation");
     translationDir.mkdirs();
@@ -404,13 +449,53 @@ public class DonutRecreation extends JavaPlugin {
     }, 40L, 40L);
   }
 
+  private void saveStaffSettings(UUID pid) {
+    staffSettings.put(pid, new StaffSettings(
+        showTpsEnabled.contains(pid),
+        hideManager.isHidingName(pid),
+        hideManager.isHidingSkin(pid)));
+  }
+
+  private void restoreStaffSettings(Player player) {
+    UUID pid = player.getUniqueId();
+    StaffSettings saved = staffSettings.get(pid);
+    if (saved == null) {
+      return;
+    }
+    if (saved.showTps) {
+      showTpsEnabled.add(pid);
+    }
+    if (saved.hideName) {
+      hideManager.setHidingName(pid, true);
+      hideManager.applyToViewer(player);
+    }
+    if (saved.hideSkin) {
+      hideManager.setHidingSkin(pid, true);
+      hideManager.applyToViewer(player);
+    }
+  }
+
   private void saveStaffData() {
     try {
+      for (UUID pid : staffModeActive) {
+        Player player = getServer().getPlayer(pid);
+        if (player != null) {
+          saveStaffSettings(pid);
+        }
+      }
       java.io.File file = new java.io.File(getDataFolder(), "staffdata.yml");
       java.util.List<String> lines = new java.util.ArrayList<>();
       lines.add("staff-uuids:");
       for (UUID id : staffModeActive) {
         lines.add("  - " + id.toString());
+      }
+      lines.add("settings:");
+      for (java.util.Map.Entry<java.util.UUID, StaffSettings> entry : staffSettings.entrySet()) {
+        StaffSettings s = entry.getValue();
+        lines.add("  " + entry.getKey() + ":");
+        lines.add("    showtps: " + s.showTps);
+        lines.add("    hidename: " + s.hideName);
+        lines.add("    hideskin: " + s.hideSkin);
       }
       java.nio.file.Files.write(file.toPath(), lines);
     } catch (Exception e) {
@@ -423,12 +508,49 @@ public class DonutRecreation extends JavaPlugin {
       java.io.File file = new java.io.File(getDataFolder(), "staffdata.yml");
       if (!file.exists()) return;
       java.util.List<String> lines = java.nio.file.Files.readAllLines(file.toPath());
-      for (String line : lines) {
-        line = line.trim();
-        if (line.startsWith("- ")) {
+      boolean inSettings = false;
+      UUID currentUuid = null;
+      boolean showTps = false;
+      boolean hideName = false;
+      boolean hideSkin = false;
+      for (String rawLine : lines) {
+        String line = rawLine.trim();
+        if (line.startsWith("staff-uuids:")) {
+          inSettings = false;
+          continue;
+        }
+        if (line.startsWith("settings:")) {
+          inSettings = true;
+          currentUuid = null;
+          continue;
+        }
+        if (inSettings) {
+          if (line.endsWith(":")) {
+            if (currentUuid != null) {
+              staffSettings.put(currentUuid, new StaffSettings(showTps, hideName, hideSkin));
+            }
+            currentUuid = UUID.fromString(line.substring(0, line.length() - 1).trim());
+            showTps = false;
+            hideName = false;
+            hideSkin = false;
+          } else if (line.startsWith("showtps:")
+              || line.startsWith("hidename:")
+              || line.startsWith("hideskin:")) {
+            String[] parts = line.split(":", 2);
+            boolean value = Boolean.parseBoolean(parts[1].trim());
+            switch (parts[0].trim()) {
+              case "showtps" -> showTps = value;
+              case "hidename" -> hideName = value;
+              default -> hideSkin = value;
+            }
+          }
+        } else if (line.startsWith("- ")) {
           UUID id = UUID.fromString(line.substring(2));
           staffModeActive.add(id);
         }
+      }
+      if (currentUuid != null) {
+        staffSettings.put(currentUuid, new StaffSettings(showTps, hideName, hideSkin));
       }
       for (UUID pid : staffModeActive) {
         Player player = getServer().getPlayer(pid);

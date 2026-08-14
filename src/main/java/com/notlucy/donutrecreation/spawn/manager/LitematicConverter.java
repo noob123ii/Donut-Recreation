@@ -83,21 +83,27 @@ public final class LitematicConverter {
 
   @SuppressWarnings("unchecked")
   private static List<StashManager.StashBlock> readRegion(Map<String, Object> region) {
-    int sx;
-    int sy;
-    int sz;
+    int sxRaw;
+    int syRaw;
+    int szRaw;
     Object sizeObj = region.get("Size");
     if (sizeObj instanceof int[] arr && arr.length >= 3) {
-      sx = Math.abs(arr[0]);
-      sy = Math.abs(arr[1]);
-      sz = Math.abs(arr[2]);
+      sxRaw = arr[0];
+      syRaw = arr[1];
+      szRaw = arr[2];
     } else if (sizeObj instanceof Map<?, ?> m) {
-      sx = Math.abs(((Number) m.get("x")).intValue());
-      sy = Math.abs(((Number) m.get("y")).intValue());
-      sz = Math.abs(((Number) m.get("z")).intValue());
+      sxRaw = ((Number) m.get("x")).intValue();
+      syRaw = ((Number) m.get("y")).intValue();
+      szRaw = ((Number) m.get("z")).intValue();
     } else {
       return List.of();
     }
+    int sx = Math.abs(sxRaw);
+    int sy = Math.abs(syRaw);
+    int sz = Math.abs(szRaw);
+    int offX = sxRaw < 0 ? sxRaw + 1 : 0;
+    int offY = syRaw < 0 ? syRaw + 1 : 0;
+    int offZ = szRaw < 0 ? szRaw + 1 : 0;
 
     int px = 0;
     int py = 0;
@@ -170,7 +176,8 @@ public final class LitematicConverter {
           int bx = i % sx;
           int bz = (i / sx) % sz;
           int by = i / (sx * sz);
-          blocks.add(new StashManager.StashBlock(bx + px, (sy - 1 - by) + py, bz + pz, all));
+          blocks.add(new StashManager.StashBlock(
+              bx + offX + px, by + offY + py, bz + offZ + pz, all));
         }
       }
       return blocks;
@@ -195,7 +202,8 @@ public final class LitematicConverter {
       int bx = i % sx;
       int bz = (i / sx) % sz;
       int by = i / (sx * sz);
-      blocks.add(new StashManager.StashBlock(bx + px, (sy - 1 - by) + py, bz + pz, data));
+      blocks.add(new StashManager.StashBlock(
+          bx + offX + px, by + offY + py, bz + offZ + pz, data));
     }
     return blocks;
   }

@@ -27,53 +27,70 @@ import com.notlucy.donutrecreation.util.LogData;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class StashManager {
 
+  private final org.bukkit.plugin.Plugin plugin;
   private final List<StashTemplate> templates = new ArrayList<>();
   private final File stashDir;
 
-  public StashManager(File dataFolder) {
+  public StashManager(org.bukkit.plugin.Plugin plugin, File dataFolder) {
+    this.plugin = plugin;
     this.stashDir = new File(dataFolder, "Stashs");
     loadAll();
   }
 
   public void reload() {
-    templates.clear();
+    synchronized (templates) {
+      templates.clear();
+    }
     loadAll();
   }
 
   public boolean isEmpty() {
-    return templates.isEmpty();
+    synchronized (templates) {
+      return templates.isEmpty();
+    }
   }
 
   public int count() {
-    return templates.size();
+    synchronized (templates) {
+      return templates.size();
+    }
   }
 
   public StashTemplate pickRandom() {
-    if (templates.isEmpty()) {
-      return null;
+    synchronized (templates) {
+      if (templates.isEmpty()) {
+        return null;
+      }
+      return templates.get(ThreadLocalRandom.current().nextInt(templates.size()));
     }
-    return templates.get(ThreadLocalRandom.current().nextInt(templates.size()));
   }
 
   public StashTemplate getByName(String name) {
-    if (name == null || templates.isEmpty()) {
+    if (name == null) {
       return null;
     }
-    String lowerName = name.toLowerCase(Locale.ROOT);
-    for (StashTemplate t : templates) {
-      if (t.name.toLowerCase(Locale.ROOT).equals(lowerName)) {
-        return t;
+    synchronized (templates) {
+      if (templates.isEmpty()) {
+        return null;
+      }
+      String lowerName = name.toLowerCase(Locale.ROOT);
+      for (StashTemplate t : templates) {
+        if (t.name.toLowerCase(Locale.ROOT).equals(lowerName)) {
+          return t;
+        }
       }
     }
     return null;
   }
 
   public List<String> getTemplateNames() {
-    List<String> names = new ArrayList<>(templates.size());
-    for (StashTemplate t : templates) {
-      names.add(t.name);
+    synchronized (templates) {
+      List<String> names = new ArrayList<>(templates.size());
+      for (StashTemplate t : templates) {
+        names.add(t.name);
+      }
+      return names;
     }
-    return names;
   }
 
   private void loadAll() {
@@ -84,24 +101,32 @@ public final class StashManager {
       }
       writeDefaultTemplates();
     }
-    convertLitematics();
-    Set<String> referenced = collectReferencedMcFunctions(stashDir);
-    List<File> ymlFiles = new ArrayList<>();
-    collectYml(stashDir, ymlFiles, referenced);
-    for (File file : ymlFiles) {
+    Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
       try {
-        StashTemplate t = loadYaml(file);
-        if (t != null && !t.blocks.isEmpty()) {
-          templates.add(t);
-          LogData.get().info("[stash] loaded '" + t.name
-              + "' (" + t.blocks.size() + " blocks)");
+        convertLitematics();
+        Set<String> referenced = collectReferencedMcFunctions(stashDir);
+        List<File> ymlFiles = new ArrayList<>();
+        collectYml(stashDir, ymlFiles, referenced);
+        for (File file : ymlFiles) {
+          try {
+            StashTemplate t = loadYaml(file);
+            synchronized (templates) {
+              if (t != null && !t.blocks.isEmpty()) {
+                templates.add(t);
+                LogData.get().info("[stash] loaded '" + t.name
+                    + "' (" + t.blocks.size() + " blocks)");
+              }
+            }
+          } catch (Throwable e) {
+            LogData.get().warning("[stash] failed to load " + file.getName() + ": " + e);
+          }
         }
-      } catch (Throwable e) {
-        LogData.get().warning("[stash] failed to load " + file.getName() + ": " + e);
+        LogData.get().info("[stash] " + count()
+            + " template(s) loaded.");
+      } catch (Throwable t) {
+        LogData.get().warning("[stash] async load failed: " + t);
       }
-    }
-    LogData.get().info("[stash] " + templates.size()
-        + " template(s) loaded.");
+    });
   }
 
   private void convertLitematics() {

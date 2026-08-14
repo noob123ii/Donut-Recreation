@@ -91,7 +91,7 @@ public class RevealManager {
     var cfg = plugin.getConfig();
     this.floorY            = cfg.getInt("hider.hide-below-y", 0);
     this.upperY            = Math.max(this.floorY, cfg.getInt("hider.barrier-upper-y", 10));
-    this.upperRevealRadius = Math.max(1, cfg.getInt("hider.upper-reveal-radius", 2));
+    this.upperRevealRadius = Math.max(1, cfg.getInt("hider.upper-reveal-radius", 1));
     this.worldMinY         = cfg.getInt("hider.world-min-y", -64);
     this.initialRadius     = cfg.getInt("hider.reveal-initial-radius", 3);
     this.movementRadius    = cfg.getInt("hider.reveal-movement-radius", 2);
@@ -301,7 +301,13 @@ public class RevealManager {
     surfacedSinceTick.remove(id);
 
     Set<Long> desired = new HashSet<>();
-    addSquare(desired, pcx, pcz, 2);
+    boolean nearFloor = py <= floorY;
+    if (nearFloor) {
+      addSquare(desired, pcx, pcz, movementRadius);
+      int floodStartY = Math.min(py, floorY - 1);
+      desired.addAll(throttledFlood(id, player.getWorld(),
+          pcx << 4, floodStartY, pcz << 4));
+    }
 
     Set<Long> toReveal = new HashSet<>(desired);
     toReveal.removeAll(current);
@@ -357,20 +363,14 @@ public class RevealManager {
     Set<Long> current = revealedUpper.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
     Set<Long> toReveal = new HashSet<>(desiredUpper);
     toReveal.removeAll(current);
-    Set<Long> toHide = new HashSet<>(current);
-    toHide.removeAll(desiredUpper);
 
-    if (toReveal.isEmpty() && toHide.isEmpty()) return;
+    if (toReveal.isEmpty()) return;
 
     for (long k : toReveal) {
       sendUpperBand(player, keyX(k), keyZ(k), false);
       current.add(k);
       notifyChunkRevealed(player, keyX(k), keyZ(k));
     }
-
-    for (long k : toHide)   { sendUpperBand(player, keyX(k), keyZ(k), true);  current.remove(k); }
-
-    enforceRevealedCap(player, current, pcx, pcz);
   }
 
   void sendUpperBand(Player player, int chunkX, int chunkZ, boolean mask) {
@@ -695,7 +695,8 @@ public class RevealManager {
     Set<Long> chunks = new HashSet<>();
     int minY = Math.max(worldMinY, world.getMinHeight());
     int maxY = floorY - 1;
-    if (sy < minY || sy > maxY) return chunks;
+    if (sy < minY) sy = minY;
+    if (sy > maxY) sy = maxY;
 
     Set<Long> visited = new HashSet<>();
     Deque<int[]> queue = new ArrayDeque<>();

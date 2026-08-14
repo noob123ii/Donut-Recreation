@@ -12,11 +12,14 @@ public final class ChunkDataHandler {
   private final RevealManager rm;
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
+  private final BlockEntityDebugProtection tiles;
 
-  public ChunkDataHandler(RevealManager rm, DeepslateProtection deepslate, AmethystProtection amethyst) {
+  public ChunkDataHandler(RevealManager rm, DeepslateProtection deepslate,
+      AmethystProtection amethyst, BlockEntityDebugProtection tiles) {
     this.rm = rm;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
+    this.tiles = tiles;
   }
 
   public boolean handle(PacketSendEvent event, Player player) {
@@ -37,10 +40,9 @@ public final class ChunkDataHandler {
       LogData.get().warning("[hider] deepslate rewrite crashed at " + cx + "," + cz + ": " + e);
     }
     try {
-      if (!touched && !rm.isRevealed(player, cx, cz)) {
-        BlockEntityDebugProtection.scrubTilesBelow(wrapper.getColumn(), rm.hideBelowY());
-        touched = true;
-      }
+      // Always scrub tiles - this must not be gated behind other rewrites
+      // or block-entity debug/ESP can read the base contents.
+      touched |= tiles.scrubChunk(wrapper.getColumn(), player, cx, cz);
     } catch (Throwable e) {
       LogData.get().warning("[hider] tile scrub crashed at " + cx + "," + cz + ": " + e);
     }

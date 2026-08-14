@@ -11,8 +11,12 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicLong;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
+import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.plugin.Plugin;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
@@ -53,6 +57,16 @@ public final class GhostBlockManager {
   @SuppressFBWarnings(value = "EI_EXPOSE_REP2", justification = "Plugin is shared by Bukkit.")
   public GhostBlockManager(Plugin plugin) {
     this.plugin = plugin;
+    plugin.getServer().getPluginManager().registerEvents(new Listener() {
+      @EventHandler
+      public void onChunkLoad(ChunkLoadEvent event) {
+        int cx = event.getChunk().getX();
+        int cz = event.getChunk().getZ();
+        for (Player viewer : Bukkit.getOnlinePlayers()) {
+          resendForChunk(viewer.getUniqueId(), viewer, cx, cz);
+        }
+      }
+    }, plugin);
   }
 
   public boolean hasGhostBlockAt(UUID playerId, int x, int y, int z) {
@@ -71,8 +85,24 @@ public final class GhostBlockManager {
 
   public long broadcast(List<GhostBlock> ghosts, long ttlTicks, int radius, Runnable onRevert) {
     if (ghosts == null || ghosts.isEmpty()) return -1L;
+    GhostBlock origin = ghosts.get(0);
+    World world = origin.location.getWorld();
+    int ox = origin.location.getBlockX();
+    int oz = origin.location.getBlockZ();
+    double radiusSq = (double) radius * (double) radius;
     long firstId = -1L;
     for (Player viewer : Bukkit.getOnlinePlayers()) {
+      Location vloc = viewer.getLocation();
+      if (world != null && !world.equals(vloc.getWorld())) {
+        continue;
+      }
+      if (radius > 0) {
+        double dx = vloc.getBlockX() - ox;
+        double dz = vloc.getBlockZ() - oz;
+        if (dx * dx + dz * dz > radiusSq) {
+          continue;
+        }
+      }
       long id = send(viewer, ghosts, ttlTicks, onRevert);
       if (firstId == -1L) firstId = id;
     }
@@ -94,10 +124,12 @@ public final class GhostBlockManager {
         int cx = loc.getBlockX() >> 4;
         int cz = loc.getBlockZ() >> 4;
         long key = chunkKey(cx, cz);
-        batches.computeIfAbsent(key, ignored -> new HashMap<>()).put(loc, ghost.data);
         sentLocations.add(ghost.location);
         playerChunks.computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>())
             .add(ghost);
+        if (loc.getWorld() != null && loc.getWorld().isChunkLoaded(cx, cz)) {
+          batches.computeIfAbsent(key, ignored -> new HashMap<>()).put(loc, ghost.data);
+        }
       } catch (Throwable ignored) {
       }
     }
@@ -126,7 +158,10 @@ public final class GhostBlockManager {
       Map<Location, BlockData> batch = new HashMap<>();
       for (Location loc : group.locations) {
         try {
-          batch.put(loc, loc.getBlock().getBlockData());
+          if (loc.getWorld() != null
+              && loc.getWorld().isChunkLoaded(loc.getBlockX() >> 4, loc.getBlockZ() >> 4)) {
+            batch.put(loc, loc.getBlock().getBlockData());
+          }
         } catch (Throwable ignored) {
         }
       }

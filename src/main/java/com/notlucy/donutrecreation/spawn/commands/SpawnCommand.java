@@ -328,11 +328,19 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
   }
 
   private boolean isDeepslatePairZ(World world, int x, int y, int z) {
+    if (!world.isChunkLoaded(x >> 4, z >> 4)
+        || !world.isChunkLoaded(x >> 4, (z + 1) >> 4)) {
+      return false;
+    }
     return world.getBlockAt(x, y, z).getType() == Material.DEEPSLATE
         && world.getBlockAt(x, y, z + 1).getType() == Material.DEEPSLATE;
   }
 
   private boolean isDeepslatePairX(World world, int x, int y, int z) {
+    if (!world.isChunkLoaded(x >> 4, z >> 4)
+        || !world.isChunkLoaded((x + 1) >> 4, z >> 4)) {
+      return false;
+    }
     return world.getBlockAt(x, y, z).getType() == Material.DEEPSLATE
         && world.getBlockAt(x + 1, y, z).getType() == Material.DEEPSLATE;
   }

@@ -1,37 +1,52 @@
 package com.notlucy.donutrecreation.staffmode;
 
 import com.github.retrooper.packetevents.PacketEvents;
+import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.protocol.player.TextureProperty;
 import com.github.retrooper.packetevents.protocol.player.UserProfile;
-import com.github.retrooper.packetevents.protocol.util.LegacyComponent;
+import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate.Action;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate.PlayerInfo;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.CollisionRule;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.NameTagVisibility;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.OptionData;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.ScoreBoardTeamInfo;
-import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerTeams.TeamMode;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.notlucy.donutrecreation.spawn.manager.SkinStore;
+import com.notlucy.donutrecreation.util.LogData;
 import java.util.EnumSet;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.format.TextDecoration;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
+import org.bukkit.scoreboard.Team;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class HideManager {
 
+  /** Profile name used while a name is hidden. Matches no scoreboard team and renders no tag. */
+  private static final String HIDDEN_NAME = "";
+
+  public interface BotRespawner {
+    void respawnFor(Player viewer, UUID botUuid);
+  }
+
   private final Set<UUID> hideName = ConcurrentHashMap.newKeySet();
   private final Set<UUID> hideSkin = ConcurrentHashMap.newKeySet();
+  private final Set<TestBot> extraTargets = ConcurrentHashMap.newKeySet();
+  private final Map<UUID, Map<UUID, Component>> displayNameCache = new ConcurrentHashMap<>();
+  private BotRespawner botRespawner;
+
+  public void setBotRespawner(BotRespawner botRespawner) {
+    this.botRespawner = botRespawner;
+  }
 
   public boolean toggleName(UUID id) {
     boolean newState = !hideName.contains(id);
@@ -43,6 +58,14 @@ public final class HideManager {
     return newState;
   }
 
+  public void setHidingName(UUID id, boolean hidden) {
+    if (hidden) {
+      hideName.add(id);
+    } else {
+      hideName.remove(id);
+    }
+  }
+
   public boolean toggleSkin(UUID id) {
     boolean newState = !hideSkin.contains(id);
     if (newState) {
@@ -51,6 +74,14 @@ public final class HideManager {
       hideSkin.remove(id);
     }
     return newState;
+  }
+
+  public void setHidingSkin(UUID id, boolean hidden) {
+    if (hidden) {
+      hideSkin.add(id);
+    } else {
+      hideSkin.remove(id);
+    }
   }
 
   public boolean isHidingName(UUID id) {
@@ -64,19 +95,31 @@ public final class HideManager {
   public void clear(UUID id) {
     hideName.remove(id);
     hideSkin.remove(id);
+    displayNameCache.remove(id);
+  }
+
+  public void registerExtraTarget(TestBot bot) {
+    extraTargets.add(bot);
+  }
+
+  public void unregisterExtraTarget(TestBot bot) {
+    extraTargets.remove(bot);
   }
 
   public void applyToViewer(Player viewer) {
+    boolean n = hideName.contains(viewer.getUniqueId());
+    boolean s = hideSkin.contains(viewer.getUniqueId());
+    if (!n && !s) {
+      return;
+    }
     for (Player target : Bukkit.getOnlinePlayers()) {
       if (target.equals(viewer)) {
         continue;
       }
-      if (hideName.contains(viewer.getUniqueId())) {
-        sendNameState(viewer, target, true);
-      }
-      if (hideSkin.contains(viewer.getUniqueId())) {
-        sendSkinState(viewer, target, true);
-      }
+      applyIdentity(viewer, target, n, s);
+    }
+    for (TestBot bot : extraTargets) {
+      applyBotIdentity(viewer, bot, true);
     }
   }
 
@@ -85,68 +128,155 @@ public final class HideManager {
       if (viewer.equals(target)) {
         continue;
       }
-      if (hideName.contains(viewer.getUniqueId())) {
-        sendNameState(viewer, target, true);
+      boolean n = hideName.contains(viewer.getUniqueId());
+      boolean s = hideSkin.contains(viewer.getUniqueId());
+      if (n || s) {
+        applyIdentity(viewer, target, n, s);
       }
-      if (hideSkin.contains(viewer.getUniqueId())) {
-        sendSkinState(viewer, target, true);
+    }
+    for (TestBot bot : extraTargets) {
+      for (Player viewer : Bukkit.getOnlinePlayers()) {
+        if (hideName.contains(viewer.getUniqueId())
+            || hideSkin.contains(viewer.getUniqueId())) {
+          applyBotIdentity(viewer, bot, true);
+        }
       }
     }
   }
 
-  public void restoreAll(Player viewer) {
+  public void restoreAllNames(Player viewer) {
+    boolean s = hideSkin.contains(viewer.getUniqueId());
     for (Player target : Bukkit.getOnlinePlayers()) {
       if (target.equals(viewer)) {
         continue;
       }
-      sendNameState(viewer, target, false);
-      sendSkinState(viewer, target, false);
+      applyIdentity(viewer, target, false, s);
+    }
+    for (TestBot bot : extraTargets) {
+      applyBotIdentity(viewer, bot, false);
     }
   }
 
-  private void sendNameState(Player viewer, Player target, boolean hidden) {
-    try {
-      String teamName = "dn" + target.getUniqueId().toString()
-          .replace("-", "").substring(0, 13);
-      if (hidden) {
-        ScoreBoardTeamInfo info = new ScoreBoardTeamInfo(
-            LegacyComponent.empty(), new LegacyComponent("\u00a7k"), LegacyComponent.empty(),
-            NameTagVisibility.ALWAYS, CollisionRule.ALWAYS, NamedTextColor.WHITE,
-            OptionData.NONE);
-        send(viewer, new WrapperPlayServerTeams(
-            teamName, TeamMode.CREATE, info, List.of(target.getName())));
-      } else {
-        send(viewer, new WrapperPlayServerTeams(
-            teamName, TeamMode.REMOVE, Optional.empty(), List.of()));
+  public void restoreAllSkins(Player viewer) {
+    boolean n = hideName.contains(viewer.getUniqueId());
+    for (Player target : Bukkit.getOnlinePlayers()) {
+      if (target.equals(viewer)) {
+        continue;
       }
-      PlayerInfo display = new PlayerInfo(targetProfile(target, false), true, 0,
-          GameMode.SURVIVAL, displayName(target, hidden), null);
-      send(viewer, new WrapperPlayServerPlayerInfoUpdate(
-          EnumSet.of(WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_DISPLAY_NAME),
-          List.of(display)));
-    } catch (Throwable ignored) {
+      applyIdentity(viewer, target, n, false);
+    }
+    for (TestBot bot : extraTargets) {
+      applyBotIdentity(viewer, bot, false);
     }
   }
 
-  private void sendSkinState(Player viewer, Player target, boolean hidden) {
+  /**
+   * Swaps the tab-list identity of {@code target} for {@code viewer} only:
+   *  - name hidden: profile name becomes blank (no scoreboard team matches it, so the
+   *    above-head tag, including any role prefix, disappears) while the cached full
+   *    display name keeps the tab list looking normal for the viewer;
+   *  - skin hidden: textures are dropped from the profile.
+   * Restoring sends the original profile back, which brings the name, role and skin
+   * back. Other players' clients never receive these packets.
+   */
+  private void applyIdentity(Player viewer, Player target,
+      boolean nameHidden, boolean skinHidden) {
+    if (nameHidden) {
+      cacheName(viewer, target);
+    } else {
+      dropCachedName(viewer, target);
+    }
     try {
-      UserProfile profile = hidden
-          ? new UserProfile(target.getUniqueId(), target.getName(), List.of())
-          : targetProfile(target, true);
-      PlayerInfo info = new PlayerInfo(profile, true, 0, GameMode.SURVIVAL, null, null);
-      send(viewer, new WrapperPlayServerPlayerInfoUpdate(
-          EnumSet.of(
-              WrapperPlayServerPlayerInfoUpdate.Action.ADD_PLAYER,
-              WrapperPlayServerPlayerInfoUpdate.Action.UPDATE_LISTED),
-          List.of(info)));
-    } catch (Throwable ignored) {
+      send(viewer, new WrapperPlayServerPlayerInfoRemove(List.of(target.getUniqueId())));
+      UserProfile profile;
+      if (nameHidden && !skinHidden) {
+        profile = renamedWithTextures(target);
+      } else if (nameHidden) {
+        profile = new UserProfile(target.getUniqueId(), HIDDEN_NAME);
+      } else {
+        profile = targetProfile(target, !skinHidden);
+      }
+      EnumSet<Action> actions = EnumSet.of(
+          Action.ADD_PLAYER, Action.UPDATE_LISTED, Action.UPDATE_DISPLAY_NAME);
+      PlayerInfo info = new PlayerInfo(profile, true, 0, GameMode.SURVIVAL,
+          nameHidden ? cachedName(viewer, target) : null, null);
+      send(viewer, new WrapperPlayServerPlayerInfoUpdate(actions, List.of(info)));
+      respawnPlayerEntity(viewer, target);
+      LogData.get().fine("[hidename] " + (nameHidden ? "hidden" : "shown")
+          + " name for " + target.getName() + " to " + viewer.getName());
+    } catch (Throwable error) {
+      LogData.get().warning("[hidename] identity swap failed for "
+          + target.getName() + " to " + viewer.getName() + ": " + error);
     }
   }
 
-  private static Component displayName(Player target, boolean hidden) {
-    return hidden
-        ? Component.text(target.getName()).decorate(TextDecoration.OBFUSCATED)
-        : Component.text(target.getName());
+  private void cacheName(Player viewer, Player target) {
+    displayNameCache.computeIfAbsent(viewer.getUniqueId(), k -> new ConcurrentHashMap<>())
+        .putIfAbsent(target.getUniqueId(), fullDisplayName(target));
+  }
+
+  private void dropCachedName(Player viewer, Player target) {
+    Map<UUID, Component> names = displayNameCache.get(viewer.getUniqueId());
+    if (names != null) {
+      names.remove(target.getUniqueId());
+    }
+  }
+
+  private Component cachedName(Player viewer, Player target) {
+    Map<UUID, Component> names = displayNameCache.get(viewer.getUniqueId());
+    return names == null ? null : names.get(target.getUniqueId());
+  }
+
+  /** The full display name (with role prefix, as shown in the tab list) for a player. */
+  private static Component fullDisplayName(Player target) {
+    Component listName = target.playerListName();
+    if (listName != null) {
+      return listName;
+    }
+    Team team = target.getScoreboard().getEntryTeam(target.getName());
+    if (team != null) {
+      return LegacyComponentSerializer.legacySection().deserialize(
+          team.getPrefix() + team.getColor() + target.getName() + team.getSuffix());
+    }
+    return Component.text(target.getName());
+  }
+
+  private void applyBotIdentity(Player viewer, TestBot bot, boolean hidden) {
+    if (botRespawner == null) {
+      return;
+    }
+    try {
+      send(viewer, new WrapperPlayServerPlayerInfoRemove(List.of(bot.uuid())));
+      botRespawner.respawnFor(viewer, bot.uuid());
+      LogData.get().fine("[hidename] bot " + (hidden ? "hidden" : "shown")
+          + " for " + viewer.getName());
+    } catch (Throwable error) {
+      LogData.get().warning("[hidename] bot identity swap failed for "
+          + viewer.getName() + ": " + error);
+    }
+  }
+
+  private static UserProfile renamedWithTextures(Player target) {
+    SkinStore.SkinRecord live = SkinStore.liveOf(target);
+    if (live != null && live.texture() != null && !live.texture().isEmpty()) {
+      return new UserProfile(target.getUniqueId(), HIDDEN_NAME, List.of(
+          new TextureProperty("textures", live.texture(), live.signature())));
+    }
+    return new UserProfile(target.getUniqueId(), HIDDEN_NAME);
+  }
+
+  private void respawnPlayerEntity(Player viewer, Player target) {
+    try {
+      send(viewer, new WrapperPlayServerDestroyEntities(target.getEntityId()));
+      Location loc = target.getLocation();
+      com.github.retrooper.packetevents.protocol.world.Location pl =
+          new com.github.retrooper.packetevents.protocol.world.Location(
+              loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch());
+      send(viewer, new WrapperPlayServerSpawnEntity(
+          target.getEntityId(), target.getUniqueId(), EntityTypes.PLAYER, pl,
+          loc.getYaw(), 0, new Vector3d(0, 0, 0)));
+    } catch (Throwable ignored) {
+    }
   }
 
   private static UserProfile targetProfile(Player target, boolean withTextures) {

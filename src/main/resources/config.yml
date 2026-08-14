@@ -5,8 +5,8 @@ logging:
 hider:
   enabled: true
   hide-below-y: 0
-  barrier-upper-y: 10
-  upper-reveal-radius: 2
+  barrier-upper-y: 5
+  upper-reveal-radius: 1
   world-min-y: -64
   creative-spectator-radius-reveal: false
   reveal-initial-radius: 2
@@ -20,8 +20,8 @@ hider:
   tile-entity-mask-above-range: 32
   recompute-period-ticks: 30
   recompute-min-ticks: 10
-  flood-fill-budget: 5000
-  flood-fill-block-radius: 32
+  flood-fill-budget: 200000
+  flood-fill-block-radius: 96
   flood-fill-throttle-ticks: 40
   entity-scan-chunk-radius: 4
   geode-hide-enabled: true

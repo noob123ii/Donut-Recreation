@@ -43,6 +43,7 @@ public class PacketHider {
   private final Map<UUID, Map<Integer, PendingSpawn>> pendingSpawns = new ConcurrentHashMap<>();
   private final Map<PacketType.Play.Server, BiConsumer<PacketSendEvent, Player>> handlers =
       new EnumMap<>(PacketType.Play.Server.class);
+  private BlockEntityDebugProtection tiles;
   private MultiBlockChangeHandler multiBlockChange;
   private PacketListenerAbstract listener;
 
@@ -52,12 +53,13 @@ public class PacketHider {
     rm.setChunkRevealCallback(this::resendSpawnsForChunk);
     DeepslateProtection deepslate = new DeepslateProtection(rm, registry);
     AmethystProtection amethyst = new AmethystProtection(rm, registry);
+    BlockEntityDebugProtection tiles = new BlockEntityDebugProtection(rm);
 
-    ChunkDataHandler chunkData = new ChunkDataHandler(rm, deepslate, amethyst);
+    ChunkDataHandler chunkData = new ChunkDataHandler(rm, deepslate, amethyst, tiles);
     UpdateLightHandler updateLight = new UpdateLightHandler(rm);
     BlockChangeHandler blockChange = new BlockChangeHandler(rm, deepslate, amethyst);
     this.multiBlockChange = new MultiBlockChangeHandler(rm, deepslate, amethyst);
-    BlockEntityDebugProtection tiles = new BlockEntityDebugProtection(rm);
+    this.tiles = tiles;
     SoundDamper sounds = new SoundDamper(rm);
     ParticleDamper particles = new ParticleDamper(rm);
     ExplosionDamper explosions = new ExplosionDamper(rm);
@@ -167,7 +169,9 @@ public class PacketHider {
 
   private void handleUnloadChunk(PacketSendEvent event, Player player) {
     var w = new WrapperPlayServerUnloadChunk(event);
-    rm.markChunkUnloaded(player.getUniqueId(), w.getChunkX(0), w.getChunkZ(0));
+    int cx = w.getChunkX(0);
+    int cz = w.getChunkZ(0);
+    rm.markChunkUnloaded(player.getUniqueId(), cx, cz);
   }
 
   private void handleSpawnEntity(PacketSendEvent event, Player player) {
