@@ -122,12 +122,16 @@ public final class DeepslateProtection {
         }
       }
 
+      int aboveY = rm.spawnerMaskAboveY();
       int spawnerFloorId = ids.floorId();
       int spawnerMasked = 0;
       for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
-          for (int y = Math.max(0, floorY - worldOriginY); y < 16; y++) {
-            if (section.getBlockId(x, y, z) == ids.spawnerId()) {
+          for (int y = 0; y < 16; y++) {
+            if (section.getBlockId(x, y, z) != ids.spawnerId()) {
+              continue;
+            }
+            if (worldOriginY + y > aboveY) {
               section.set(x, y, z, spawnerFloorId);
               spawnerMasked++;
             }
@@ -200,6 +204,9 @@ public final class DeepslateProtection {
         for (int y = lowY; y < highY; y++) {
           int wy = worldOriginY + y;
           if (rm.hasGhostBlockAt(playerId, wx, wy, wz)) {
+            continue;
+          }
+          if (section.getBlockId(x, y, z) == ids.spawnerId()) {
             continue;
           }
           int geodeBlock = 0;

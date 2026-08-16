@@ -6,6 +6,7 @@ hider:
   enabled: true
   hide-below-y: 0
   barrier-upper-y: 5
+  spawner-mask-above-y: 150
   upper-reveal-radius: 1
   world-min-y: -64
   creative-spectator-radius-reveal: false
@@ -14,7 +15,7 @@ hider:
   reveal-edge-extra-radius: 0
   sticky-radius: 2
   max-revealed-chunks-per-player: 512
-  max-reveal-hide-per-recompute: 32
+  max-reveal-hide-per-recompute: 64
   tile-entity-mask-enabled: true
   tile-entity-render-distance: 16
   tile-entity-mask-above-range: 32

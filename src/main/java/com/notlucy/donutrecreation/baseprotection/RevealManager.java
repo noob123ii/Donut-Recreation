@@ -88,6 +88,7 @@ public class RevealManager {
 
   private final int        maxRevealHidePerRecompute;
   private final BlockData[] fakeFloorPalette;
+  private final int        spawnerMaskAboveY;
 
   public RevealManager(DonutRecreation plugin) {
     this.plugin = plugin;
@@ -114,6 +115,7 @@ public class RevealManager {
     this.maxGeodeChunks           = Math.max(256, cfg.getInt("hider.max-geode-chunks", 16384));
 
     this.maxRevealHidePerRecompute = Math.max(1, cfg.getInt("hider.max-reveal-hide-per-recompute", 64));
+    this.spawnerMaskAboveY = cfg.getInt("hider.spawner-mask-above-y", 150);
 
     this.geodeOn      = cfg.getBoolean("hider.geode-hide-enabled", true);
     this.geodeRadius  = cfg.getInt("hider.geode-reveal-radius", 8);
@@ -137,6 +139,7 @@ public class RevealManager {
 
   public int hideBelowY()   { return floorY; }
   public int upperBarrierY() { return upperY; }
+  public int spawnerMaskAboveY() { return spawnerMaskAboveY; }
   public int worldMinY()    { return worldMinY; }
   public int initialRadius() { return initialRadius; }
   public int movementRadius() { return movementRadius; }
@@ -340,7 +343,13 @@ public class RevealManager {
     }
 
     int sent = 0;
-    for (long k : toReveal) {
+    java.util.List<Long> ordered = new java.util.ArrayList<>(toReveal);
+    ordered.sort(java.util.Comparator.comparingLong(k -> {
+      long dx = Math.abs((long) pcx - keyX(k));
+      long dz = Math.abs((long) pcz - keyZ(k));
+      return Math.max(dx, dz);
+    }));
+    for (long k : ordered) {
       if (sent >= maxRevealHidePerRecompute) break;
       if (verbose && sent < 5) {
         LogData.get().info("[hider] " + player.getName()
@@ -371,6 +380,10 @@ public class RevealManager {
     boolean nearUpper = py >= floorY && py < upperY + 2;
     if (nearFloor || nearUpper) {
       addSquare(desiredUpper, pcx, pcz, upperRevealRadius);
+    }
+    Set<Long> revealedKeys = revealed.get(id);
+    if (revealedKeys != null && !revealedKeys.isEmpty()) {
+      desiredUpper.addAll(revealedKeys);
     }
 
     Set<Long> current = revealedUpper.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
@@ -611,8 +624,6 @@ public class RevealManager {
     int maxY  = floorY;
     int baseX = chunkX << 4;
     int baseZ = chunkZ << 4;
-    BlockData[] palette   = fakeFloorPalette;
-    int paletteLen = palette.length;
     int salt = saltFor(player.getUniqueId());
     UUID worldUid = world.getUID();
     long chunkKey = chunkKey(chunkX, chunkZ);
@@ -630,15 +641,7 @@ public class RevealManager {
           if (ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, wx, y, wz)) {
             continue;
           }
-          BlockData real = chunk.getBlock(x, y, z).getBlockData();
-          Material type = real.getMaterial();
-
-          if ((type == Material.VOID_AIR || type == Material.AIR) && y <= minY + 2) {
-            int idx = Math.floorMod(scrambleHash(wx ^ salt, y, wz ^ salt), paletteLen);
-            real = palette[idx];
-          }
-
-          batch.put(new Location(world, wx, y, wz), real);
+          batch.put(new Location(world, wx, y, wz), chunk.getBlock(x, y, z).getBlockData());
           if (++n >= batchSize) { player.sendMultiBlockChange(batch); batch.clear(); n = 0; }
         }
       }

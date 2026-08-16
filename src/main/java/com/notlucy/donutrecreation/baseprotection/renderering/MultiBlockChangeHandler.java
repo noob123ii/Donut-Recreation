@@ -51,7 +51,7 @@ public final class MultiBlockChangeHandler {
           enc.setBlockId(want);
           floorFixes++;
         }
-      } else if (enc.getY() >= rm.hideBelowY() && enc.getBlockId() == spawnerId) {
+      } else if (enc.getY() > rm.spawnerMaskAboveY() && enc.getBlockId() == spawnerId) {
         enc.setBlockId(floorId);
         spawnerFixes++;
       }

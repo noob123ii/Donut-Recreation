@@ -36,7 +36,7 @@ public final class BlockChangeHandler {
       event.markForReEncode(true);
       return true;
     }
-    if (y >= rm.hideBelowY()) {
+    if (y > rm.spawnerMaskAboveY()) {
       var state = wrapper.getBlockState();
       if (state != null && deepslate.isSpawner(state.getGlobalId())) {
         wrapper.setBlockState(WrappedBlockState.getByGlobalId(deepslate.floorId()));
