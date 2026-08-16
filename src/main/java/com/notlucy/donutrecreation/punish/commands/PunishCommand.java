@@ -205,7 +205,16 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     if (root == null) {
       return Collections.emptyList();
     }
-    return new ArrayList<>(root.getKeys(false));
+    List<String> result = new ArrayList<>();
+    for (String key : root.getKeys(false)) {
+      if (key.equals("new-player-balances")) {
+        continue;
+      }
+      if (root.getConfigurationSection(key) != null) {
+        result.add(key);
+      }
+    }
+    return result;
   }
 
   private UUID resolveUuid(String name, OfflinePlayer fallback) {

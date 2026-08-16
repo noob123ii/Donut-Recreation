@@ -18,6 +18,7 @@ import com.notlucy.donutrecreation.translation.model.SignedText;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import java.util.Locale;
 import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
@@ -92,8 +93,23 @@ public final class TranslationListener implements Listener {
       } else {
         display = manager.translate(message, senderLang, recipientLang);
       }
-      recipient.sendMessage(Component.text("<" + sender.getName() + "> " + display));
+      recipient.sendMessage(Component.text("<").append(chatName(sender))
+          .append(Component.text("> " + display)));
     }
+  }
+
+  /** The display name with role prefix, matching what the tab list shows for the sender. */
+  private static Component chatName(Player sender) {
+    Component listName = sender.playerListName();
+    if (listName != null) {
+      return listName;
+    }
+    var team = sender.getScoreboard().getEntryTeam(sender.getName());
+    if (team != null) {
+      return LegacyComponentSerializer.legacySection().deserialize(
+          team.getPrefix() + team.getColor() + sender.getName() + team.getSuffix());
+    }
+    return Component.text(sender.getName());
   }
 
   private void onPacketSend(PacketSendEvent event) {

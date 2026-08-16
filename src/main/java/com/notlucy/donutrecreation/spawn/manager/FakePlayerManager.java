@@ -339,20 +339,20 @@ public final class FakePlayerManager {
     return new WrapperPlayServerPlayerInfoUpdate(actions, List.of(info));
   }
 
-  /** The full display name (with role prefix, as shown in the tab list) the npc copies. */
+  /** The full display name (with role prefix, as shown in the name tag) the npc copies. */
   private static Component computeDisplayName(String name) {
     Player online = Bukkit.getPlayerExact(name);
     if (online == null) {
       return Component.text(name);
     }
-    Component listName = online.playerListName();
-    if (listName != null) {
-      return listName;
-    }
     Team team = online.getScoreboard().getEntryTeam(name);
     if (team != null) {
       return LegacyComponentSerializer.legacySection().deserialize(
           team.getPrefix() + team.getColor() + name + team.getSuffix());
+    }
+    Component listName = online.playerListName();
+    if (listName != null) {
+      return listName;
     }
     return Component.text(name);
   }

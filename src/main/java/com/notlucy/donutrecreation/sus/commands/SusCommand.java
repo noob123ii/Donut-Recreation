@@ -67,6 +67,17 @@ public class SusCommand implements CommandExecutor, Listener {
     Bukkit.getScheduler().runTaskTimer(plugin, this::tickLeash, 20L, 10L);
   }
 
+  public void releaseSpectate(UUID viewerId) {
+    if (spectatePairs.remove(viewerId) != null) {
+      Player viewer = Bukkit.getPlayer(viewerId);
+      if (viewer != null && viewer.isOnline()) {
+        viewer.setSpectatorTarget(null);
+        viewer.sendMessage(plugin.color(
+            "&7Spectating ended \u2014 you can now move freely."));
+      }
+    }
+  }
+
   private void tickLeash() {
     if (spectatePairs.isEmpty()) {
       return;
@@ -183,6 +194,7 @@ public class SusCommand implements CommandExecutor, Listener {
     var pdc = meta.getPersistentDataContainer();
 
     if (pdc.has(refreshKey, PersistentDataType.BYTE)) {
+      releaseSpectate(viewer.getUniqueId());
       openPlayerList(viewer, viewPage.getOrDefault(viewer.getUniqueId(), 0));
       playAlert(viewer);
       return;

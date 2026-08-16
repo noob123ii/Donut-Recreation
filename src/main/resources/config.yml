@@ -20,9 +20,11 @@ hider:
   tile-entity-mask-above-range: 32
   recompute-period-ticks: 30
   recompute-min-ticks: 10
-  flood-fill-budget: 200000
-  flood-fill-block-radius: 96
+  flood-fill-budget: 250000
+  flood-fill-block-radius: 128
   flood-fill-throttle-ticks: 40
+  flood-fill-reuse-ticks: 80
+  cave-probe-range: 24
   entity-scan-chunk-radius: 4
   geode-hide-enabled: true
   geode-reveal-radius: 3
@@ -35,6 +37,8 @@ hider:
   salt-rotate-period-ticks: 24000
   salt-rotate-stagger-ticks: 20
   void-redirect-server: ""
+  void-trigger-y: -64
+  void-attempt-cooldown-ms: 1000
   void-spawn-world: "world"
   void-spawn-x: 0
   void-spawn-y: 100
@@ -86,6 +90,25 @@ sus:
 
 translation:
   minecraft-lang-source: "C:/Users/cpatt/AppData/Roaming/.minecraft/feather/assets/game/lang"
+
+staffmode:
+  whitelisted-commands:
+    - acsus
+    - spawnfake
+    - offend
+    - punish
+    - unban
+    - unwipe
+    - unoffend
+    - donut
+    - staffmode
+    - sfmode
+    - gtp
+  gamemode-commands:
+    - gmc
+    - gmsp
+    - gms
+    - gamemode
 
 messages:
   prefix: "&x&F&F&5&5&5&5&lSUS &8> "

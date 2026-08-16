@@ -55,6 +55,7 @@ public class RevealManager {
   private com.notlucy.donutrecreation.spawn.manager.GhostBlockManager ghostBlockManager;
 
   private final ConcurrentMap<UUID, Long>     lastFloodTick       = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Long>     lastFloodOrigin     = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Set<Long>> cachedFlood        = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, long[]>   lastRecomputeStamp  = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Integer>  playerSalt          = new ConcurrentHashMap<>();
@@ -77,6 +78,8 @@ public class RevealManager {
   private final BlockData  fakeAmethyst;
   private final boolean    verbose;
   private final int        floodThrottleTicks;
+  private final int        floodReuseTicks;
+  private final int        caveProbeRange;
   private final int        entityScanChunkRadius;
   private final int        extraRevealRadius;
   private final int        recomputeMinTicks;
@@ -97,9 +100,9 @@ public class RevealManager {
     this.movementRadius    = cfg.getInt("hider.reveal-movement-radius", 2);
 
     this.floodBudget = cfg.getInt("hider.flood-fill-budget",
-        cfg.getInt("hider.cave-flood-budget", 80_000));
+        cfg.getInt("hider.cave-flood-budget", 250_000));
     this.floodRadius  = cfg.getInt("hider.flood-fill-block-radius",
-        cfg.getInt("hider.cave-flood-block-radius", 96));
+        cfg.getInt("hider.cave-flood-block-radius", 128));
     this.floodRadiusSq = floodRadius * floodRadius;
 
     this.stickyRadius = cfg.getInt("hider.sticky-radius", 10);
@@ -120,6 +123,8 @@ public class RevealManager {
     this.fakeAmethyst = Material.STONE.createBlockData();
     this.verbose      = cfg.getBoolean("hider.verbose-logging", false);
     this.floodThrottleTicks   = cfg.getInt("hider.flood-fill-throttle-ticks", 10);
+    this.floodReuseTicks      = Math.max(20, cfg.getInt("hider.flood-fill-reuse-ticks", 80));
+    this.caveProbeRange       = Math.max(0, cfg.getInt("hider.cave-probe-range", 24));
     this.entityScanChunkRadius = cfg.getInt("hider.entity-scan-chunk-radius", 8);
 
     LogData.get().info("[hider] up; floor=" + floorY
@@ -290,7 +295,24 @@ public class RevealManager {
 
     Set<Long> current = revealed.computeIfAbsent(id, k -> ConcurrentHashMap.newKeySet());
 
-    if (py >= upperY) {
+    Set<Long> desired = new HashSet<>();
+    boolean nearFloor = py <= floorY;
+    if (nearFloor) {
+      addSquare(desired, pcx, pcz, movementRadius);
+      int floodStartY = Math.min(py, floorY - 1);
+      desired.addAll(throttledFlood(id, player.getWorld(),
+          pcx << 4, floodStartY, pcz << 4));
+    } else if (py <= floorY + caveProbeRange) {
+      Location ploc = player.getLocation();
+      int seamY = seamBelow(player.getWorld(), ploc.getBlockX(), ploc.getBlockZ());
+      if (seamY != Integer.MIN_VALUE) {
+        addSquare(desired, pcx, pcz, movementRadius);
+        desired.addAll(throttledFlood(id, player.getWorld(),
+            ploc.getBlockX(), seamY, ploc.getBlockZ()));
+      }
+    }
+
+    if (desired.isEmpty()) {
       surfacedSinceTick.remove(id);
       recomputeUpperBand(player, id, pcx, pcz, py);
       recomputeGeodeForPlayer(player);
@@ -299,15 +321,6 @@ public class RevealManager {
     }
 
     surfacedSinceTick.remove(id);
-
-    Set<Long> desired = new HashSet<>();
-    boolean nearFloor = py <= floorY;
-    if (nearFloor) {
-      addSquare(desired, pcx, pcz, movementRadius);
-      int floodStartY = Math.min(py, floorY - 1);
-      desired.addAll(throttledFlood(id, player.getWorld(),
-          pcx << 4, floodStartY, pcz << 4));
-    }
 
     Set<Long> toReveal = new HashSet<>(desired);
     toReveal.removeAll(current);
@@ -699,15 +712,17 @@ public class RevealManager {
     if (sy > maxY) sy = maxY;
 
     Set<Long> visited = new HashSet<>();
-    Deque<int[]> queue = new ArrayDeque<>();
-    queue.add(new int[]{sx, sy, sz});
+    Deque<Long> queue = new ArrayDeque<>();
+    queue.add(voxelKey(sx, sy, sz));
     visited.add(voxelKey(sx, sy, sz));
     int budget = floodBudget;
     int rsq = floodRadiusSq;
 
     while (!queue.isEmpty() && budget-- > 0) {
-      int[] cur = queue.poll();
-      int x = cur[0], y = cur[1], z = cur[2];
+      long packed = queue.poll();
+      int x = (int) (packed >> 38);
+      int z = (int) ((packed << 26) >> 26);
+      int y = (int) ((packed << 52) >> 52);
       chunks.add(chunkKey(x >> 4, z >> 4));
       for (int n = 0; n < 6; n++) {
         int nx = x + NX[n], ny = y + NY[n], nz = z + NZ[n];
@@ -716,13 +731,26 @@ public class RevealManager {
         if (dxr * dxr + dzr * dzr > rsq) continue;
         if (!visited.add(voxelKey(nx, ny, nz))) continue;
         if (!world.isChunkLoaded(nx >> 4, nz >> 4)) continue;
-        if (isPassable(world.getBlockAt(nx, ny, nz))) queue.add(new int[]{nx, ny, nz});
+        if (isPassable(world.getType(nx, ny, nz))) {
+          queue.add(voxelKey(nx, ny, nz));
+        }
       }
     }
     if (verbose && budget <= 0) {
       LogData.get().info("[hider] flood ran out of budget at " + chunks.size() + " chunks");
     }
     return chunks;
+  }
+
+  private int seamBelow(World world, int bx, int bz) {
+    int lo = Math.max(worldMinY, world.getMinHeight());
+    int hi = Math.min(floorY - 1, world.getMaxHeight() - 1);
+    for (int y = hi; y >= lo; y--) {
+      if (isPassable(world.getType(bx, y, bz))) {
+        return y;
+      }
+    }
+    return Integer.MIN_VALUE;
   }
 
   private static long voxelKey(int x, int y, int z) {
@@ -803,8 +831,7 @@ public class RevealManager {
     return dot > 0.707;
   }
 
-  private static boolean isPassable(Block block) {
-    Material m = block.getType();
+  private static boolean isPassable(Material m) {
     return m == Material.AIR || m == Material.CAVE_AIR || m == Material.VOID_AIR
         || !m.isOccluding();
   }
@@ -820,7 +847,7 @@ public class RevealManager {
   }
 
   public void invalidateFloodCache(UUID id) {
-    if (id != null) { lastFloodTick.remove(id); cachedFlood.remove(id); }
+    if (id != null) { lastFloodTick.remove(id); cachedFlood.remove(id); lastFloodOrigin.remove(id); }
   }
 
   public void clearRevealedForPlayer(UUID id) {
@@ -849,6 +876,7 @@ public class RevealManager {
     hiddenEntities.remove(id);
     bypassed.remove(id);
     lastFloodTick.remove(id);
+    lastFloodOrigin.remove(id);
     cachedFlood.remove(id);
     lastRecomputeStamp.remove(id);
     playerSalt.remove(id);
@@ -962,13 +990,18 @@ public class RevealManager {
 
   private Set<Long> throttledFlood(UUID id, World world, int x, int y, int z) {
     long now = currentTick();
-    Long last = lastFloodTick.get(id);
-    if (last != null && now - last < floodThrottleTicks) {
+    long origin = chunkKey(x >> 4, z >> 4);
+    Long lastOrigin = lastFloodOrigin.get(id);
+    if (lastOrigin != null && lastOrigin.longValue() == origin) {
+      Long last = lastFloodTick.get(id);
       Set<Long> cached = cachedFlood.get(id);
-      if (cached != null) return new HashSet<>(cached);
+      if (last != null && now - last < floodReuseTicks && cached != null) {
+        return new HashSet<>(cached);
+      }
     }
     Set<Long> fresh = floodFillCave(world, x, y, z);
     lastFloodTick.put(id, now);
+    lastFloodOrigin.put(id, origin);
     cachedFlood.put(id, fresh);
     return fresh;
   }

@@ -5,6 +5,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 
 import org.bukkit.Bukkit;
+import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -31,10 +32,17 @@ public final class RevealListener implements Listener {
   private int taskId = -1;
 
   private int period = 10;
+  private int voidTriggerY = -60;
+  private long voidCooldownMs = 1000;
+  private final java.util.concurrent.ConcurrentMap<java.util.UUID, Long> lastVoidAttempt =
+      new java.util.concurrent.ConcurrentHashMap<>();
 
   public RevealListener(RevealManager rm, PacketHider hider) {
     this.rm    = rm;
     this.hider = hider;
+    var cfg = rm.plugin().getConfig();
+    this.voidTriggerY  = cfg.getInt("hider.void-trigger-y", -64);
+    this.voidCooldownMs = Math.max(0, cfg.getLong("hider.void-attempt-cooldown-ms", 1000));
   }
 
   public void start() {
@@ -91,7 +99,7 @@ public final class RevealListener implements Listener {
 
     Player player = event.getPlayer();
 
-    if (to.getY() <= -65) { handleVoid(player); return; }
+    if (to.getY() < voidTriggerY && from.getY() >= to.getY()) { handleVoid(player); return; }
 
     int fcx = from.getBlockX() >> 4, fcz = from.getBlockZ() >> 4;
     int tcx = to.getBlockX()   >> 4, tcz = to.getBlockZ()   >> 4;
@@ -119,6 +127,23 @@ public final class RevealListener implements Listener {
 
   @SuppressWarnings("checkstyle:MagicNumber")
   private void handleVoid(Player player) {
+    long now = System.currentTimeMillis();
+    Long last = lastVoidAttempt.get(player.getUniqueId());
+    if (last != null && now - last < voidCooldownMs) return;
+    lastVoidAttempt.put(player.getUniqueId(), now);
+
+    int py = player.getLocation().getBlockY();
+    rm.plugin().susFlagManager().flag(player, "Under Bedrock (y=" + py + ")", "underbedrock");
+    var flag = rm.plugin().susFlagManager().getFlag(player.getUniqueId());
+    int count = flag != null ? flag.count() : 1;
+    String msg = rm.plugin().color("&c[acsus] &f" + player.getName()
+        + " &7Under Bedrock (y=" + py + ") &c(" + count + " flags)");
+    Bukkit.getOnlinePlayers().stream()
+        .filter(p -> p.hasPermission("donutrecreation.*"))
+        .forEach(op -> op.sendMessage(msg));
+    rm.plugin().getLogger().info("[acsus] flagged " + player.getName()
+        + ": Under Bedrock (y=" + py + ") (" + count + " flags)");
+
     var cfg = rm.plugin().getConfig();
     String redirect = cfg.getString("hider.void-redirect-server", "");
     if (redirect != null && !redirect.isEmpty()) { sendRedirect(player, redirect); return; }
@@ -130,7 +155,14 @@ public final class RevealListener implements Listener {
     double z   = cfg.getDouble("hider.void-spawn-z", world.getSpawnLocation().getZ());
     float  yaw   = (float) cfg.getDouble("hider.void-spawn-yaw", 0);
     float  pitch = (float) cfg.getDouble("hider.void-spawn-pitch", 0);
-    player.teleport(new Location(world, x, y, z, yaw, pitch));
+    if (player.teleport(new Location(world, x, y, z, yaw, pitch))) {
+      return;
+    }
+    Location loc = player.getLocation();
+    int surfaceY = loc.getWorld().getHighestBlockYAt(loc.getBlockX(), loc.getBlockZ(),
+        HeightMap.MOTION_BLOCKING);
+    player.teleport(new Location(loc.getWorld(), loc.getX(), surfaceY + 1.0, loc.getZ(),
+        loc.getYaw(), loc.getPitch()));
   }
 
   private void sendRedirect(Player player, String server) {
@@ -216,6 +248,7 @@ public final class RevealListener implements Listener {
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPlayerQuit(PlayerQuitEvent event) {
     rm.removePlayer(event.getPlayer());
+    lastVoidAttempt.remove(event.getPlayer().getUniqueId());
     if (hider != null) hider.clearPlayer(event.getPlayer().getUniqueId());
   }
 }

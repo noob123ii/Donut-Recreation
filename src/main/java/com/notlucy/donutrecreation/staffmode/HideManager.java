@@ -2,12 +2,15 @@ package com.notlucy.donutrecreation.staffmode;
 
 import com.github.retrooper.packetevents.PacketEvents;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
+import com.github.retrooper.packetevents.protocol.player.Equipment;
+import com.github.retrooper.packetevents.protocol.player.EquipmentSlot;
 import com.github.retrooper.packetevents.protocol.player.GameMode;
 import com.github.retrooper.packetevents.protocol.player.TextureProperty;
 import com.github.retrooper.packetevents.protocol.player.UserProfile;
 import com.github.retrooper.packetevents.util.Vector3d;
 import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDestroyEntities;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityEquipment;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoRemove;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPlayerInfoUpdate.Action;
@@ -15,6 +18,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerPl
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnEntity;
 import com.notlucy.donutrecreation.spawn.manager.SkinStore;
 import com.notlucy.donutrecreation.util.LogData;
+import io.github.retrooper.packetevents.util.SpigotConversionUtil;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
@@ -227,16 +231,16 @@ public final class HideManager {
     return names == null ? null : names.get(target.getUniqueId());
   }
 
-  /** The full display name (with role prefix, as shown in the tab list) for a player. */
+  /** The full display name (with role prefix, as shown in the name tag) for a player. */
   private static Component fullDisplayName(Player target) {
-    Component listName = target.playerListName();
-    if (listName != null) {
-      return listName;
-    }
     Team team = target.getScoreboard().getEntryTeam(target.getName());
     if (team != null) {
       return LegacyComponentSerializer.legacySection().deserialize(
           team.getPrefix() + team.getColor() + target.getName() + team.getSuffix());
+    }
+    Component listName = target.playerListName();
+    if (listName != null) {
+      return listName;
     }
     return Component.text(target.getName());
   }
@@ -275,8 +279,26 @@ public final class HideManager {
       send(viewer, new WrapperPlayServerSpawnEntity(
           target.getEntityId(), target.getUniqueId(), EntityTypes.PLAYER, pl,
           loc.getYaw(), 0, new Vector3d(0, 0, 0)));
+      send(viewer, equipmentPacket(target));
     } catch (Throwable ignored) {
     }
+  }
+
+  /** Re-sends the target's held items and armor, which a respawn wipes on the client. */
+  private static WrapperPlayServerEntityEquipment equipmentPacket(Player target) {
+    org.bukkit.inventory.PlayerInventory inv = target.getInventory();
+    List<Equipment> equipment = List.of(
+        equipment(EquipmentSlot.MAIN_HAND, inv.getItemInMainHand()),
+        equipment(EquipmentSlot.OFF_HAND, inv.getItemInOffHand()),
+        equipment(EquipmentSlot.HELMET, inv.getHelmet()),
+        equipment(EquipmentSlot.CHEST_PLATE, inv.getChestplate()),
+        equipment(EquipmentSlot.LEGGINGS, inv.getLeggings()),
+        equipment(EquipmentSlot.BOOTS, inv.getBoots()));
+    return new WrapperPlayServerEntityEquipment(target.getEntityId(), equipment);
+  }
+
+  private static Equipment equipment(EquipmentSlot slot, org.bukkit.inventory.ItemStack item) {
+    return new Equipment(slot, SpigotConversionUtil.fromBukkitItemStack(item));
   }
 
   private static UserProfile targetProfile(Player target, boolean withTextures) {

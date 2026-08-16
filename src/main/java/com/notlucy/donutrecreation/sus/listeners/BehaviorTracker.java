@@ -10,16 +10,17 @@ import java.util.Map;
 import java.util.UUID;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.plugin.EventExecutor;
-import org.bukkit.plugin.Plugin;
-import org.bukkit.plugin.RegisteredListener;
 import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.plugin.EventExecutor;
+import org.bukkit.plugin.Plugin;
+import org.bukkit.plugin.RegisteredListener;
 
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public class BehaviorTracker implements Listener {
@@ -30,6 +31,10 @@ public class BehaviorTracker implements Listener {
   private static final int REPEAT_LIMIT = 100;
   private static final long MACRO_WINDOW_MS = 60_000L;
   private static final long RE_COOLDOWN_MS = 60_000L;
+  private static final long DIG_TIME_WINDOW_MS = 10_000L;
+  private static final int MIN_DIG_STREAK = 5;
+  private static final long FAST_GAP_MS = 250L;
+  private static final int FAST_GAP_MIN = 8;
 
   private final DonutRecreation plugin;
   private final Map<UUID, State> states = new HashMap<>();
@@ -206,17 +211,27 @@ public class BehaviorTracker implements Listener {
     Player player = event.getPlayer();
     State state = states.computeIfAbsent(player.getUniqueId(), id -> new State());
     long now = System.currentTimeMillis();
+    Block block = event.getBlock();
+
     state.mines.add(now);
     while (!state.mines.isEmpty() && now - state.mines.peekFirst() > MINE_WINDOW_MS) {
       state.mines.pollFirst();
     }
     if (state.mines.size() >= MINE_BURST && cooldownReady(state.mineAt, now)) {
       state.mineAt = now;
-      plugin.susFlagManager().flag(player,
+      flagAndBroadcast(player,
           "Sustained mining: " + state.mines.size() + " blocks in "
-              + (MINE_WINDOW_MS / 1000) + "s (possible base-finding)");
+              + (MINE_WINDOW_MS / 1000) + "s (possible base-finding)", "mining");
     }
-    Material mat = event.getBlock().getType();
+    int floorY = plugin.getConfig().getInt("hider.hide-below-y", 0);
+    int by = block.getY();
+    if (by <= floorY && cooldownReady(state.baseFindAt, now)) {
+      state.baseFindAt = now;
+      flagAndBroadcast(player,
+          "Base-finding: broke a block below the hide line (y=" + by + ")", "basefinding");
+    }
+    trackDig(state, player, block, now);
+    Material mat = block.getType();
     track(state, "break:" + mat.name(), now, player, "Macroing (break " + mat.name() + ")");
   }
 
@@ -245,23 +260,69 @@ public class BehaviorTracker implements Listener {
       q.pollFirst();
     }
     Long last = state.macroAt.get(key);
-    if (q.size() >= REPEAT_LIMIT
-        && (last == null || now - last >= RE_COOLDOWN_MS)) {
+    if (q.size() >= REPEAT_LIMIT && cooldownReady(state.macroAt, now, last)) {
       state.macroAt.put(key, now);
-      plugin.susFlagManager().flag(player, msg + " x" + q.size());
+      flagAndBroadcast(player, msg + " x" + q.size(), "macro");
     }
+    Long prev = state.lastActionAt.get(key);
+    int streak = (prev != null && now - prev <= FAST_GAP_MS)
+        ? state.fastStreak.getOrDefault(key, 0) + 1 : 0;
+    state.fastStreak.put(key, streak);
+    state.lastActionAt.put(key, now);
+    if (streak >= FAST_GAP_MIN && cooldownReady(state.macroAt, now, last)) {
+      state.macroAt.put(key, now);
+      flagAndBroadcast(player, msg + " (sub-" + FAST_GAP_MS + "ms x" + streak + ")", "macro");
+    }
+  }
+
+  private void trackDig(State state, Player player, Block block, long now) {
+    int x = block.getX();
+    int y = block.getY();
+    int z = block.getZ();
+    if (state.digX == x && state.digZ == z && y == state.digY - 1
+        && now - state.digAt <= DIG_TIME_WINDOW_MS) {
+      state.digStreak++;
+    } else {
+      state.digStreak = 1;
+    }
+    state.digX = x;
+    state.digY = y;
+    state.digZ = z;
+    state.digAt = now;
+    if (state.digStreak >= MIN_DIG_STREAK && cooldownReady(state.baseFindAt, now)) {
+      state.baseFindAt = now;
+      flagAndBroadcast(player,
+          "Base-finding: straight-down dig (" + state.digStreak + " blocks)", "basefinding");
+    }
+  }
+
+  private void flagAndBroadcast(Player player, String reason, String category) {
+    plugin.susFlagManager().flag(player, reason, category);
+    broadcastFlag(player, "Sus", reason);
   }
 
   private static boolean cooldownReady(long last, long now) {
     return last == 0 || now - last >= RE_COOLDOWN_MS;
   }
 
+  private static boolean cooldownReady(Map<String, Long> at, long now, Long last) {
+    return last == null || now - last >= RE_COOLDOWN_MS;
+  }
+
   private static class State {
     long elytraMs;
     long elytraAt;
     long mineAt;
+    long baseFindAt;
+    int digStreak;
+    int digX;
+    int digY;
+    int digZ;
+    long digAt;
     final Deque<Long> mines = new ArrayDeque<>();
     final Map<String, Deque<Long>> windows = new HashMap<>();
     final Map<String, Long> macroAt = new HashMap<>();
+    final Map<String, Long> lastActionAt = new HashMap<>();
+    final Map<String, Integer> fastStreak = new HashMap<>();
   }
 }

@@ -79,6 +79,7 @@ public class DonutRecreation extends JavaPlugin {
   }
   private HideManager hideManager;
   private TestBotManager testBotManager;
+  private SusCommand susCommand;
 
   @Override
   public void onLoad() {
@@ -98,7 +99,7 @@ public class DonutRecreation extends JavaPlugin {
     PacketEvents.getAPI().init();
     preloadMappings();
 
-    SusCommand susCommand = new SusCommand(this);
+    this.susCommand = new SusCommand(this);
     getServer().getPluginManager().registerEvents(susCommand, this);
     Objects.requireNonNull(getCommand("acsus")).setExecutor(susCommand);
     susCommand.start();
@@ -299,6 +300,9 @@ public class DonutRecreation extends JavaPlugin {
             saveStaffSettings(pid);
             staffModeActive.remove(pid);
             showTpsEnabled.remove(pid);
+            if (susCommand != null) {
+              susCommand.releaseSpectate(pid);
+            }
             if (hideManager.isHidingName(pid)) {
               hideManager.setHidingName(pid, false);
               hideManager.restoreAllNames(player);
@@ -334,10 +338,12 @@ public class DonutRecreation extends JavaPlugin {
           }
           return results;
         });
+    Set<String> staffCmds = loadCommandList("staffmode.whitelisted-commands",
+        Set.of("acsus", "spawnfake", "offend", "punish", "unban", "unwipe", "unoffend",
+            "donut", "staffmode", "sfmode", "gtp"));
+    Set<String> gamemodeCmds = loadCommandList("staffmode.gamemode-commands",
+        Set.of("gmc", "gmsp", "gms", "gamemode"));
     var staffListener = new Listener() {
-      private final Set<String> STAFF_CMDS = Set.of(
-          "acsus", "spawnfake", "offend", "punish", "unban", "unwipe", "unoffend", "donut", "staffmode");
-      private final Set<String> GAMEMODE_CMDS = Set.of("gmc", "gmsp", "gms", "gamemode");
 
       @EventHandler
       public void onCommand(org.bukkit.event.player.PlayerCommandPreprocessEvent e) {
@@ -345,8 +351,8 @@ public class DonutRecreation extends JavaPlugin {
         String label = e.getMessage().substring(1).split(" ")[0].toLowerCase(Locale.ROOT);
         String base = label.contains(":") ? label.substring(label.lastIndexOf(':') + 1) : label;
         if ("staffmode".equals(base)) return;
-        boolean isStaff = STAFF_CMDS.contains(base);
-        boolean isGamemode = GAMEMODE_CMDS.contains(base);
+        boolean isStaff = staffCmds.contains(base);
+        boolean isGamemode = gamemodeCmds.contains(base);
         if (staffModeActive.contains(e.getPlayer().getUniqueId())) {
           if (!isStaff && !isGamemode) {
             e.setCancelled(true);
@@ -364,11 +370,11 @@ public class DonutRecreation extends JavaPlugin {
       public void onTabList(org.bukkit.event.player.PlayerCommandSendEvent e) {
         if (!e.getPlayer().hasPermission("donutrecreation.*")) return;
         if (staffModeActive.contains(e.getPlayer().getUniqueId())) {
-          Set<String> allowed = new java.util.HashSet<>(STAFF_CMDS);
-          allowed.addAll(GAMEMODE_CMDS);
+          Set<String> allowed = new java.util.HashSet<>(staffCmds);
+          allowed.addAll(gamemodeCmds);
           e.getCommands().retainAll(allowed);
         } else {
-          e.getCommands().removeAll(STAFF_CMDS);
+          e.getCommands().removeAll(staffCmds);
           e.getCommands().add("staffmode");
         }
       }
@@ -382,54 +388,57 @@ public class DonutRecreation extends JavaPlugin {
     getServer().getPluginManager().registerEvents(
         new com.notlucy.donutrecreation.util.PearlKeeper(), this);
 
-    File translationDir = new File(getDataFolder(), "translation");
-    translationDir.mkdirs();
-    File langDir = new File(translationDir, "lang");
-    if (!langDir.isDirectory()) {
-      langDir.mkdirs();
-      String sourcePath = getConfig().getString("translation.minecraft-lang-source", "");
-      if (!sourcePath.isEmpty()) {
-        MinecraftLanguageLoader.copyFromSource(new File(sourcePath), langDir, getLogger());
-      } else {
-        extractLangFiles(langDir);
-      }
-    }
-    MinecraftLanguageLoader mcLangLoader = new MinecraftLanguageLoader();
-    mcLangLoader.load(langDir, getLogger());
-    TranslationManager translationManager = new TranslationManager(this, translationDir, mcLangLoader);
-    LanguageManager languageManager = new LanguageManager(getDataFolder());
-    TranslationListener translationListener = new TranslationListener(this, translationManager, languageManager);
-    getServer().getPluginManager().registerEvents(translationListener, this);
-    try {
-      PacketEvents.getAPI().getEventManager().registerListener(translationListener.packetListener);
-    } catch (Exception e) {
-      getLogger().warning("Failed to register translation listener: " + e.getMessage());
-    }
-    LanguageDetector detector = new LanguageDetector(languageManager, this);
-    try {
-      PacketEvents.getAPI().getEventManager().registerListener(detector.packetListener);
-    } catch (Exception e) {
-      getLogger().warning("Failed to register language detector: " + e.getMessage());
-    }
-
-    getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
-      @EventHandler(priority = EventPriority.MONITOR)
-      public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
-        Player player = event.getPlayer();
-        String locale = player.getLocale();
-        if (locale == null || locale.isEmpty()) return;
-        String lang = locale.toLowerCase(java.util.Locale.ROOT);
-        if (!lang.equals(languageManager.getLang(player.getUniqueId()))) {
-          languageManager.setLang(player.getUniqueId(), lang);
-          getLogger().info("[LanguageDetector] " + player.getName()
-              + " joined with language '" + lang + "' (locale: " + locale + ")");
-        }
-      }
-    }, this);
+    // TRANSLATION: disabled while being reworked. Uncomment to restore.
+//    File translationDir = new File(getDataFolder(), "translation");
+//    translationDir.mkdirs();
+//    File langDir = new File(translationDir, "lang");
+//    if (!langDir.isDirectory()) {
+//      langDir.mkdirs();
+//      String sourcePath = getConfig().getString("translation.minecraft-lang-source", "");
+//      if (!sourcePath.isEmpty()) {
+//        MinecraftLanguageLoader.copyFromSource(new File(sourcePath), langDir, getLogger());
+//      } else {
+//        extractLangFiles(langDir);
+//      }
+//    }
+//    MinecraftLanguageLoader mcLangLoader = new MinecraftLanguageLoader();
+//    mcLangLoader.load(langDir, getLogger());
+//    TranslationManager translationManager = new TranslationManager(this, translationDir, mcLangLoader);
+//    LanguageManager languageManager = new LanguageManager(getDataFolder());
+//    TranslationListener translationListener = new TranslationListener(this, translationManager, languageManager);
+//    getServer().getPluginManager().registerEvents(translationListener, this);
+//    try {
+//      PacketEvents.getAPI().getEventManager().registerListener(translationListener.packetListener);
+//    } catch (Exception e) {
+//      getLogger().warning("Failed to register translation listener: " + e.getMessage());
+//    }
+//    LanguageDetector detector = new LanguageDetector(languageManager, this);
+//    try {
+//      PacketEvents.getAPI().getEventManager().registerListener(detector.packetListener);
+//    } catch (Exception e) {
+//      getLogger().warning("Failed to register language detector: " + e.getMessage());
+//    }
+//
+//    getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
+//      @EventHandler(priority = EventPriority.MONITOR)
+//      public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
+//        Player player = event.getPlayer();
+//        String locale = player.getLocale();
+//        if (locale == null || locale.isEmpty()) return;
+//        String lang = locale.toLowerCase(java.util.Locale.ROOT);
+//        if (!lang.equals(languageManager.getLang(player.getUniqueId()))) {
+//          languageManager.setLang(player.getUniqueId(), lang);
+//          getLogger().info("[LanguageDetector] " + player.getName()
+//              + " joined with language '" + lang + "' (locale: " + locale + ")");
+//        }
+//      }
+//    }, this);
 
     setupHider();
     startTpsDisplay();
     loadStaffData();
+    getServer().getPluginManager().registerEvents(
+        new com.notlucy.donutrecreation.staffmode.ChatRoleListener(), this);
   }
 
   private void startTpsDisplay() {
@@ -671,6 +680,18 @@ public class DonutRecreation extends JavaPlugin {
         || !(sender instanceof Player)
         || sender.isOp()
         || sender.hasPermission("donutrecreation.*");
+  }
+
+  /** Reads a command whitelist from config, falling back to the defaults when unset. */
+  private Set<String> loadCommandList(String path, Set<String> fallback) {
+    Set<String> loaded = new java.util.HashSet<>();
+    for (String cmd : getConfig().getStringList(path)) {
+      String clean = cmd.trim().toLowerCase(Locale.ROOT);
+      if (!clean.isEmpty()) {
+        loaded.add(clean);
+      }
+    }
+    return loaded.isEmpty() ? fallback : loaded;
   }
 
   private void toggleLuckPermsPermission(Player player, String permission, boolean grant) {
