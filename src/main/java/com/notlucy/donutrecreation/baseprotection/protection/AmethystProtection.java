@@ -69,6 +69,10 @@ public final class AmethystProtection {
       return false;
     }
 
+    if (revealManager.isGeodeVisibleTo(player, chunkX, chunkZ)) {
+      return false;
+    }
+
     int swapped = maskPositions(sections, positions, minSection);
     if (swapped <= 0) {
       return false;
@@ -108,8 +112,9 @@ public final class AmethystProtection {
 
     syncCache(nowAmethyst, wasAmethyst, x, y, z);
 
-    if (nowAmethyst || wasAmethyst) {
-      wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.floorId()));
+    if ((nowAmethyst || wasAmethyst)
+        && !revealManager.isGeodeVisibleTo(player, x >> 4, z >> 4)) {
+      wrapper.setBlockState(WrappedBlockState.getByGlobalId(maskIdForY(y)));
       return true;
     }
     return false;
@@ -125,6 +130,7 @@ public final class AmethystProtection {
     int chunkX = section.getX();
     int chunkZ = section.getZ();
     Set<Long> positions = revealManager.geodePositions(RevealManager.chunkKey(chunkX, chunkZ));
+    boolean visibleHere = revealManager.isGeodeVisibleTo(player, chunkX, chunkZ);
 
     int swaps = 0;
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(player.getUniqueId());
@@ -144,8 +150,8 @@ public final class AmethystProtection {
 
       syncCache(nowAmethyst, wasAmethyst, blockX, blockY, blockZ);
 
-      if (nowAmethyst || wasAmethyst) {
-        enc.setBlockId(blockIds.floorId());
+      if (!visibleHere && (nowAmethyst || wasAmethyst)) {
+        enc.setBlockId(maskIdForY(blockY));
         swaps++;
       }
     }
@@ -217,11 +223,46 @@ public final class AmethystProtection {
       if (!blockIds.isAmethyst(section.getBlockId(localX, localY, localZ))) {
         continue;
       }
-      int target = blockIds.floorId();
+      int target = nearestSolidBlockId(sections, minSection, worldX, worldY, worldZ);
       section.set(localX, localY, localZ, target);
       swapped++;
     }
     return swapped;
+  }
+
+  private int nearestSolidBlockId(
+      BaseChunk[] sections, int minSection, int worldX, int worldY, int worldZ) {
+    for (int offsetX = -1; offsetX <= 1; offsetX++) {
+      for (int offsetY = -1; offsetY <= 1; offsetY++) {
+        for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+          if (offsetX == 0 && offsetY == 0 && offsetZ == 0) {
+            continue;
+          }
+          int neighborX = worldX + offsetX;
+          int neighborY = worldY + offsetY;
+          int neighborZ = worldZ + offsetZ;
+          int sectionIndex = (neighborY >> 4) - minSection;
+          if (sectionIndex < 0 || sectionIndex >= sections.length) {
+            continue;
+          }
+          BaseChunk section = sections[sectionIndex];
+          if (section == null) {
+            continue;
+          }
+          int id = section.getBlockId(neighborX & 0xF, neighborY & 0xF, neighborZ & 0xF);
+          if (id == blockIds.airId() || blockIds.isAmethyst(id)
+              || blockIds.isTransparent(id, false)) {
+            continue;
+          }
+          return id;
+        }
+      }
+    }
+    return maskIdForY(worldY);
+  }
+
+  private int maskIdForY(int y) {
+    return y < 0 ? blockIds.floorId() : blockIds.stoneId();
   }
 
   private void syncCache(boolean nowAmethyst, boolean wasAmethyst, int x, int y, int z) {

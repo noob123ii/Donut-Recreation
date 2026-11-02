@@ -296,7 +296,23 @@ public class RevealManager {
   }
 
   public boolean isGeodeVisibleTo(Player player, int chunkX, int chunkZ) {
-    return !geodeOn;
+    if (!geodeOn) return true;
+    Set<Long> positions = geodePositionsByChunk.get(chunkKey(chunkX, chunkZ));
+    if (positions == null || positions.isEmpty()) return true;
+    Set<Long> forced = revealedGeodeChunks.get(player.getUniqueId());
+    if (forced != null && forced.contains(chunkKey(chunkX, chunkZ))) return true;
+    Location location = player.getLocation();
+    int playerX = location.getBlockX();
+    int playerY = location.getBlockY();
+    int playerZ = location.getBlockZ();
+    long radiusSq = geodeRadiusSq;
+    for (long packed : positions) {
+      long dx = unpackX(packed) - playerX;
+      long dy = unpackY(packed) - playerY;
+      long dz = unpackZ(packed) - playerZ;
+      if (dx * dx + dy * dy + dz * dz <= radiusSq) return true;
+    }
+    return false;
   }
 
   public void forceGeodeVisible(Player player, int chunkX, int chunkZ) {
@@ -605,8 +621,15 @@ public class RevealManager {
     Set<Long> chunksToHide   = new HashSet<>(geodeChunkSet); chunksToHide.removeAll(desiredChunks);
     if (chunksToReveal.isEmpty() && chunksToHide.isEmpty()) return;
 
-    for (long chunkKeyValue : chunksToReveal) { sendRealAmethyst(player, chunkKeyValue);  geodeChunkSet.add(chunkKeyValue); }
-    for (long chunkKeyValue : chunksToHide)   { sendFakeAmethyst(player, chunkKeyValue);  geodeChunkSet.remove(chunkKeyValue); }
+    for (long chunkKeyValue : chunksToReveal) {
+      if (sendRealAmethyst(player, chunkKeyValue)) {
+        geodeChunkSet.add(chunkKeyValue);
+      }
+    }
+    for (long chunkKeyValue : chunksToHide) {
+      sendFakeAmethyst(player, chunkKeyValue);
+      geodeChunkSet.remove(chunkKeyValue);
+    }
 
     if (verbose && (!chunksToReveal.isEmpty() || !chunksToHide.isEmpty())) {
       LogData.get().info("[geode] " + player.getName()
@@ -696,11 +719,11 @@ public class RevealManager {
     }
   }
 
-  private void sendRealAmethyst(Player player, long chunkKey) {
+  private boolean sendRealAmethyst(Player player, long chunkKey) {
     Set<Long> positions = geodePositionsByChunk.get(chunkKey);
-    if (positions == null || positions.isEmpty()) return;
+    if (positions == null || positions.isEmpty()) return false;
     int chunkX = keyX(chunkKey), chunkZ = keyZ(chunkKey);
-    if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) return;
+    if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) return false;
     World world = player.getWorld();
     Map<Location, BlockData> changes = new HashMap<>(positions.size());
     long[] stale = null;
@@ -714,7 +737,7 @@ public class RevealManager {
       }
       Block live = world.getBlockAt(x, y, z);
       changes.put(new Location(world, x, y, z), live.getBlockData());
-      if (!isAmethyst(live.getType())) {
+      if (!isGeodeMaterial(live.getType())) {
         if (stale == null) stale = new long[8];
         else if (staleLen == stale.length) {
           long[] grown = new long[stale.length << 1];
@@ -731,17 +754,16 @@ public class RevealManager {
         forgetAmethystBlock(unpackX(p), unpackY(p), unpackZ(p));
       }
     }
+    return true;
   }
 
-  private void sendFakeAmethyst(Player player, long chunkKey) {
+  private boolean sendFakeAmethyst(Player player, long chunkKey) {
     Set<Long> positions = geodePositionsByChunk.get(chunkKey);
-    if (positions == null || positions.isEmpty()) return;
+    if (positions == null || positions.isEmpty()) return false;
     int chunkX = keyX(chunkKey), chunkZ = keyZ(chunkKey);
-    if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) return;
+    if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) return false;
     World world = player.getWorld();
     Map<Location, BlockData> changes = new HashMap<>(positions.size());
-    BlockData belowMask = maskPalette[0];
-    BlockData aboveMask = aboveFloorAmethystMask;
     for (long packed : positions) {
       int x = unpackX(packed);
       int y = unpackY(packed);
@@ -750,19 +772,10 @@ public class RevealManager {
           && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
         continue;
       }
-      changes.put(new Location(world, x, y, z),
-          (y < floorY) ? belowMask : aboveMask);
+      changes.put(new Location(world, x, y, z), geodeMaskBlock(world, x, y, z));
     }
     if (!changes.isEmpty()) player.sendMultiBlockChange(changes);
-  }
-
-  private static boolean isAmethyst(Material m) {
-    return m == Material.AMETHYST_BLOCK
-        || m == Material.BUDDING_AMETHYST
-        || m == Material.AMETHYST_CLUSTER
-        || m == Material.SMALL_AMETHYST_BUD
-        || m == Material.MEDIUM_AMETHYST_BUD
-        || m == Material.LARGE_AMETHYST_BUD;
+    return true;
   }
 
   public void refreshEntityVisibility(Player player) {
@@ -1236,6 +1249,25 @@ public class RevealManager {
 
   private static volatile boolean currentTickSupported = true;
 
+  private static BlockData geodeMaskBlock(World world, int x, int y, int z) {
+    for (int offsetX = -1; offsetX <= 1; offsetX++) {
+      for (int offsetY = -1; offsetY <= 1; offsetY++) {
+        for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+          if (offsetX == 0 && offsetY == 0 && offsetZ == 0) {
+            continue;
+          }
+          Block block = world.getBlockAt(x + offsetX, y + offsetY, z + offsetZ);
+          Material material = block.getType();
+          if (material.isAir() || isGeodeMaterial(material) || !material.isSolid()) {
+            continue;
+          }
+          return block.getBlockData();
+        }
+      }
+    }
+    return y < 0 ? Material.DEEPSLATE.createBlockData() : Material.STONE.createBlockData();
+  }
+
   private static boolean isGeodeMaterial(Material material) {
     return material == Material.AMETHYST_BLOCK
         || material == Material.BUDDING_AMETHYST
@@ -1326,8 +1358,8 @@ public class RevealManager {
     try {
       java.io.File folder = new java.io.File(plugin.getDataFolder(), "geode-cache");
       folder.mkdirs();
-      java.io.File scanFile = new java.io.File(folder, "scanned-v3.dat");
-      java.io.File geodeFile = new java.io.File(folder, "geodes-v3.dat");
+      java.io.File scanFile = new java.io.File(folder, "scanned-v4.dat");
+      java.io.File geodeFile = new java.io.File(folder, "geodes-v4.dat");
 
       java.util.List<String> scannedLines = new java.util.ArrayList<>();
       for (long chunkKeyValue : scannedGeodeChunks) {
@@ -1358,8 +1390,8 @@ public class RevealManager {
   public void loadGeodeData() {
     try {
       java.io.File folder = new java.io.File(plugin.getDataFolder(), "geode-cache");
-      java.io.File scanFile = new java.io.File(folder, "scanned-v3.dat");
-      java.io.File geodeFile = new java.io.File(folder, "geodes-v3.dat");
+      java.io.File scanFile = new java.io.File(folder, "scanned-v4.dat");
+      java.io.File geodeFile = new java.io.File(folder, "geodes-v4.dat");
 
       if (scanFile.exists()) {
         java.util.List<String> lines = java.nio.file.Files.readAllLines(scanFile.toPath());
