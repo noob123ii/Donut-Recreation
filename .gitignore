@@ -8,3 +8,5 @@ build/
 api/
 requirements.txt
 javac.*.args
+
+logs/
