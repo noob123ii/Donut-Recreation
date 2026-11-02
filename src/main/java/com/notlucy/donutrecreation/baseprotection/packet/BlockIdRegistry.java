@@ -99,32 +99,32 @@ public final class BlockIdRegistry {
     BitSet oreBits = new BitSet(8192);
     BitSet transBits = new BitSet(8192);
     BitSet transBitsSkipLava = new BitSet(8192);
-    for (int id = 0; id < 32768; id++) {
-      WrappedBlockState s = WrappedBlockState.getByGlobalId(version, id, false);
-      if (s == null) {
+    for (int globalId = 0; globalId < 32768; globalId++) {
+      WrappedBlockState state = WrappedBlockState.getByGlobalId(version, globalId, false);
+      if (state == null) {
         continue;
       }
-      StateType t = s.getType();
-      if (t != null) {
-        if (AMETHYST_FAMILY.contains(t)) {
-          amethystBits.set(id);
+      StateType stateType = state.getType();
+      if (stateType != null) {
+        if (AMETHYST_FAMILY.contains(stateType)) {
+          amethystBits.set(globalId);
         }
-        if (ORE_FAMILY.contains(t)) {
-          oreBits.set(id);
+        if (ORE_FAMILY.contains(stateType)) {
+          oreBits.set(globalId);
         }
-        boolean isTrans = t == StateTypes.AIR || t == StateTypes.CAVE_AIR || t == StateTypes.VOID_AIR
-            || t == StateTypes.WATER
-            || t == StateTypes.GLASS || t == StateTypes.TINTED_GLASS
-            || t == StateTypes.BARRIER || t == StateTypes.LIGHT || t == StateTypes.SEA_LANTERN
-            || t == StateTypes.SLIME_BLOCK || t == StateTypes.HONEY_BLOCK
-            || t == StateTypes.FROSTED_ICE || t == StateTypes.POWDER_SNOW
-            || t == StateTypes.END_ROD || t == StateTypes.CHAIN || t == StateTypes.COBWEB;
+        boolean isTrans = stateType == StateTypes.AIR || stateType == StateTypes.CAVE_AIR || stateType == StateTypes.VOID_AIR
+            || stateType == StateTypes.WATER
+            || stateType == StateTypes.GLASS || stateType == StateTypes.TINTED_GLASS
+            || stateType == StateTypes.BARRIER || stateType == StateTypes.LIGHT || stateType == StateTypes.SEA_LANTERN
+            || stateType == StateTypes.SLIME_BLOCK || stateType == StateTypes.HONEY_BLOCK
+            || stateType == StateTypes.FROSTED_ICE || stateType == StateTypes.POWDER_SNOW
+            || stateType == StateTypes.END_ROD || stateType == StateTypes.CHAIN || stateType == StateTypes.COBWEB;
         if (isTrans) {
-          transBits.set(id);
-          transBitsSkipLava.set(id);
+          transBits.set(globalId);
+          transBitsSkipLava.set(globalId);
         }
-        if (t == StateTypes.LAVA) {
-          transBits.set(id);
+        if (stateType == StateTypes.LAVA) {
+          transBits.set(globalId);
         }
       }
     }
@@ -138,24 +138,24 @@ public final class BlockIdRegistry {
     this.transparentSkipLavaLen = transBitsSkipLava.length();
   }
 
-  public boolean isAmethyst(int id) {
+  public boolean isAmethyst(int globalId) {
     BitSet bits = amethyst;
-    return bits != null && id >= 0 && id < amethystLen && bits.get(id);
+    return bits != null && globalId >= 0 && globalId < amethystLen && bits.get(globalId);
   }
 
   public int amethystCount() {
     return amethyst == null ? 0 : amethyst.cardinality();
   }
 
-  public boolean isOre(int id) {
+  public boolean isOre(int globalId) {
     BitSet bits = ores;
-    return bits != null && id >= 0 && id < oresLen && bits.get(id);
+    return bits != null && globalId >= 0 && globalId < oresLen && bits.get(globalId);
   }
 
-  public boolean isTransparent(int id, boolean skipLava) {
+  public boolean isTransparent(int globalId, boolean skipLava) {
     BitSet bits = skipLava ? transparentBlocksSkipLava : transparentBlocks;
     int len = skipLava ? transparentSkipLavaLen : transparentLen;
-    return bits != null && id >= 0 && id < len && bits.get(id);
+    return bits != null && globalId >= 0 && globalId < len && bits.get(globalId);
   }
 
   public int oreCount() {
@@ -182,8 +182,8 @@ public final class BlockIdRegistry {
     return spawnerId;
   }
 
-  public boolean isSpawner(int id) {
-    return id == spawnerId;
+  public boolean isSpawner(int globalId) {
+    return globalId == spawnerId;
   }
 
   public int decoyClusterId() {
@@ -223,8 +223,8 @@ public final class BlockIdRegistry {
     if (palette == null || palette.length == 0) {
       return floorId;
     }
-    int h = scramble(x ^ salt, y, z ^ salt);
-    return palette[Math.floorMod(h, palette.length)];
+    int hash = scramble(x ^ salt, y, z ^ salt);
+    return palette[Math.floorMod(hash, palette.length)];
   }
 
   public int[] floorPalette() {
@@ -232,16 +232,20 @@ public final class BlockIdRegistry {
   }
 
   private static int scramble(int x, int y, int z) {
-    int h = x * 0x9E3779B1;
-    h ^= Integer.rotateLeft(z * 0x85EBCA77, 13);
-    h ^= Integer.rotateLeft(y * 0xC2B2AE3D, 17);
-    h ^= (h >>> 16);
-    return h;
+    int hash = x * 0x9E3779B1;
+    hash ^= Integer.rotateLeft(z * 0x85EBCA77, 13);
+    hash ^= Integer.rotateLeft(y * 0xC2B2AE3D, 17);
+    hash ^= (hash >>> 16);
+    return hash;
   }
 
   private static int[] buildFloorPalette(ClientVersion version) {
     StateType[] candidates = {
-        StateTypes.DEEPSLATE
+        StateTypes.DEEPSLATE,
+        StateTypes.TUFF,
+        StateTypes.STONE,
+        StateTypes.ANDESITE,
+        StateTypes.GRAVEL
     };
     int[] tmp = new int[candidates.length];
     int written = 0;

@@ -42,6 +42,8 @@ import net.luckperms.api.model.user.User;
 import net.luckperms.api.node.types.PermissionNode;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -90,11 +92,41 @@ public class DonutRecreation extends JavaPlugin {
     PacketEvents.getAPI().load();
   }
 
+  private static final int CONFIG_VERSION = 2;
+
+  private void migrateConfigIfStale() {
+    try {
+      File cfgFile = new File(getDataFolder(), "config.yml");
+      if (!cfgFile.exists()) {
+        saveDefaultConfig();
+        reloadConfig();
+        return;
+      }
+      FileConfiguration current = YamlConfiguration.loadConfiguration(cfgFile);
+      int stored = current.getInt("config-version", 0);
+      if (stored >= CONFIG_VERSION) {
+        return;
+      }
+      File backup = new File(getDataFolder(), "config.yml.bak");
+      if (backup.exists()) {
+        backup.delete();
+      }
+      cfgFile.renameTo(backup);
+      saveDefaultConfig();
+      reloadConfig();
+      getLogger().warning("config.yml was outdated (v" + stored + "); "
+          + "regenerated from defaults. Old file kept as config.yml.bak");
+    } catch (Throwable e) {
+      getLogger().warning("config migration failed: " + e);
+    }
+  }
+
   @Override
   public void onEnable() {
     PaperLib.suggestPaper(this);
 
     saveDefaultConfig();
+    migrateConfigIfStale();
     LogData.init(this);
     PacketEvents.getAPI().init();
     preloadMappings();
@@ -388,51 +420,6 @@ public class DonutRecreation extends JavaPlugin {
     getServer().getPluginManager().registerEvents(
         new com.notlucy.donutrecreation.util.PearlKeeper(), this);
 
-    // TRANSLATION: disabled while being reworked. Uncomment to restore.
-//    File translationDir = new File(getDataFolder(), "translation");
-//    translationDir.mkdirs();
-//    File langDir = new File(translationDir, "lang");
-//    if (!langDir.isDirectory()) {
-//      langDir.mkdirs();
-//      String sourcePath = getConfig().getString("translation.minecraft-lang-source", "");
-//      if (!sourcePath.isEmpty()) {
-//        MinecraftLanguageLoader.copyFromSource(new File(sourcePath), langDir, getLogger());
-//      } else {
-//        extractLangFiles(langDir);
-//      }
-//    }
-//    MinecraftLanguageLoader mcLangLoader = new MinecraftLanguageLoader();
-//    mcLangLoader.load(langDir, getLogger());
-//    TranslationManager translationManager = new TranslationManager(this, translationDir, mcLangLoader);
-//    LanguageManager languageManager = new LanguageManager(getDataFolder());
-//    TranslationListener translationListener = new TranslationListener(this, translationManager, languageManager);
-//    getServer().getPluginManager().registerEvents(translationListener, this);
-//    try {
-//      PacketEvents.getAPI().getEventManager().registerListener(translationListener.packetListener);
-//    } catch (Exception e) {
-//      getLogger().warning("Failed to register translation listener: " + e.getMessage());
-//    }
-//    LanguageDetector detector = new LanguageDetector(languageManager, this);
-//    try {
-//      PacketEvents.getAPI().getEventManager().registerListener(detector.packetListener);
-//    } catch (Exception e) {
-//      getLogger().warning("Failed to register language detector: " + e.getMessage());
-//    }
-//
-//    getServer().getPluginManager().registerEvents(new org.bukkit.event.Listener() {
-//      @EventHandler(priority = EventPriority.MONITOR)
-//      public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
-//        Player player = event.getPlayer();
-//        String locale = player.getLocale();
-//        if (locale == null || locale.isEmpty()) return;
-//        String lang = locale.toLowerCase(java.util.Locale.ROOT);
-//        if (!lang.equals(languageManager.getLang(player.getUniqueId()))) {
-//          languageManager.setLang(player.getUniqueId(), lang);
-//          getLogger().info("[LanguageDetector] " + player.getName()
-//              + " joined with language '" + lang + "' (locale: " + locale + ")");
-//        }
-//      }
-//    }, this);
 
     setupHider();
     startTpsDisplay();
@@ -448,11 +435,11 @@ public class DonutRecreation extends JavaPlugin {
       if (tps >= 19.0) color = "&a";
       else if (tps >= 15.0) color = "&e";
       else color = "&c";
-      for (Player p : getServer().getOnlinePlayers()) {
-        if (showTpsEnabled.contains(p.getUniqueId())) {
-          String pMsg = color + "TPS: " + String.format("%.1f", Math.min(20.0, tps))
-              + " &7| Ping: &f" + p.getPing() + "ms";
-          p.sendActionBar(color(pMsg));
+      for (Player onlinePlayer : getServer().getOnlinePlayers()) {
+        if (showTpsEnabled.contains(onlinePlayer.getUniqueId())) {
+          String playerStatus = color + "TPS: " + String.format("%.1f", Math.min(20.0, tps))
+              + " &7| Ping: &f" + onlinePlayer.getPing() + "ms";
+          onlinePlayer.sendActionBar(color(playerStatus));
         }
       }
     }, 40L, 40L);
@@ -495,8 +482,8 @@ public class DonutRecreation extends JavaPlugin {
       java.io.File file = new java.io.File(getDataFolder(), "staffdata.yml");
       java.util.List<String> lines = new java.util.ArrayList<>();
       lines.add("staff-uuids:");
-      for (UUID id : staffModeActive) {
-        lines.add("  - " + id.toString());
+      for (UUID staffId : staffModeActive) {
+        lines.add("  - " + staffId.toString());
       }
       lines.add("settings:");
       for (java.util.Map.Entry<java.util.UUID, StaffSettings> entry : staffSettings.entrySet()) {
@@ -538,7 +525,11 @@ public class DonutRecreation extends JavaPlugin {
             if (currentUuid != null) {
               staffSettings.put(currentUuid, new StaffSettings(showTps, hideName, hideSkin));
             }
-            currentUuid = UUID.fromString(line.substring(0, line.length() - 1).trim());
+            try {
+              currentUuid = UUID.fromString(line.substring(0, line.length() - 1).trim());
+            } catch (IllegalArgumentException invalidUuid) {
+              currentUuid = null;
+            }
             showTps = false;
             hideName = false;
             hideSkin = false;
@@ -554,8 +545,12 @@ public class DonutRecreation extends JavaPlugin {
             }
           }
         } else if (line.startsWith("- ")) {
-          UUID id = UUID.fromString(line.substring(2));
-          staffModeActive.add(id);
+          try {
+            UUID staffId = UUID.fromString(line.substring(2));
+            staffModeActive.add(staffId);
+          } catch (IllegalArgumentException invalidUuid) {
+            /* Skip malformed staff data instead of aborting the load. */
+          }
         }
       }
       if (currentUuid != null) {
@@ -653,15 +648,15 @@ public class DonutRecreation extends JavaPlugin {
         getConfig().getLong("hider.salt-rotate-stagger-ticks", 5L));
     getServer().getScheduler().runTaskTimer(this, () -> {
       var players = new java.util.ArrayList<>(getServer().getOnlinePlayers());
-      for (int i = 0; i < players.size(); i++) {
-        var p = players.get(i);
+      for (int playerIndex = 0; playerIndex < players.size(); playerIndex++) {
+        var onlinePlayer = players.get(playerIndex);
         getServer().getScheduler().runTaskLater(this, () -> {
-          if (!p.isOnline()) {
+          if (!onlinePlayer.isOnline()) {
             return;
           }
-          revealManager.rotateSalt(p.getUniqueId());
-          revealManager.recomputeForPlayer(p);
-        }, (long) i * staggerTicks);
+          revealManager.rotatePlayerSalt(onlinePlayer.getUniqueId());
+          revealManager.refreshRevealState(onlinePlayer);
+        }, (long) playerIndex * staggerTicks);
       }
     }, periodTicks, periodTicks);
     getLogger().info("[hider] salt rotation scheduled every " + periodTicks + " ticks");
@@ -695,6 +690,9 @@ public class DonutRecreation extends JavaPlugin {
   }
 
   private void toggleLuckPermsPermission(Player player, String permission, boolean grant) {
+    if (getServer().getPluginManager().getPlugin("LuckPerms") == null) {
+      return;
+    }
     try {
       LuckPerms api = LuckPermsProvider.get();
       User user = api.getUserManager().getUser(player.getUniqueId());
@@ -727,9 +725,9 @@ public class DonutRecreation extends JavaPlugin {
               int len = 0;
               int shift = 0;
               while (idx < message.length) {
-                byte b = message[idx++];
-                len |= (b & 0x7F) << shift;
-                if ((b & 0x80) == 0) break;
+                byte currentByte = message[idx++];
+                len |= (currentByte & 0x7F) << shift;
+                if ((currentByte & 0x80) == 0) break;
                 shift += 7;
                 if (shift > 35) return;
               }
@@ -756,8 +754,8 @@ public class DonutRecreation extends JavaPlugin {
             var entry = entries.nextElement();
             if (entry.getName().startsWith("lang/") && entry.getName().endsWith(".json")) {
               File target = new File(langDir, entry.getName().substring(5));
-              try (var in = zip.getInputStream(entry)) {
-                java.nio.file.Files.copy(in, target.toPath(),
+              try (var input = zip.getInputStream(entry)) {
+                java.nio.file.Files.copy(input, target.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 count++;
               }
@@ -766,17 +764,17 @@ public class DonutRecreation extends JavaPlugin {
           getLogger().info("[translation] Extracted " + count + " bundled lang file(s)");
         }
       } else {
-        java.io.InputStream in = getClass().getClassLoader().getResourceAsStream("lang");
-        if (in != null) in.close();
+        java.io.InputStream input = getClass().getClassLoader().getResourceAsStream("lang");
+        if (input != null) input.close();
         var langResources = java.util.Collections.list(
             getClass().getClassLoader().getResources("lang"));
         for (java.net.URL url : langResources) {
           java.io.File dir = new java.io.File(url.toURI());
           java.io.File[] files = dir.listFiles((d, n) -> n.endsWith(".json"));
           if (files != null) {
-            for (java.io.File f : files) {
-              java.nio.file.Files.copy(f.toPath(),
-                  new java.io.File(langDir, f.getName()).toPath(),
+            for (java.io.File langFile : files) {
+              java.nio.file.Files.copy(langFile.toPath(),
+                  new java.io.File(langDir, langFile.getName()).toPath(),
                   java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
           }

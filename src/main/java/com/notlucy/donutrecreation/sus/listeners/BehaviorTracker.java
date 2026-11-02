@@ -41,7 +41,7 @@ public class BehaviorTracker implements Listener {
 
   @SuppressFBWarnings(
       value = "EI_EXPOSE_REP2",
-      justification = "Plugin instance is shared by Bukkit.")
+      justification = "Plugin instance is shared blockY Bukkit.")
   public BehaviorTracker(DonutRecreation plugin) {
     this.plugin = plugin;
   }
@@ -154,8 +154,8 @@ public class BehaviorTracker implements Listener {
           continue;
         }
         String part;
-        if (value instanceof String s) {
-          part = s;
+        if (value instanceof String text) {
+          part = text;
         } else {
           try {
             Object checkName = value.getClass().getMethod("getCheckName").invoke(value);
@@ -224,11 +224,11 @@ public class BehaviorTracker implements Listener {
               + (MINE_WINDOW_MS / 1000) + "s (possible base-finding)", "mining");
     }
     int floorY = plugin.getConfig().getInt("hider.hide-below-y", 0);
-    int by = block.getY();
-    if (by <= floorY && cooldownReady(state.baseFindAt, now)) {
+    int blockY = block.getY();
+    if (blockY <= floorY && cooldownReady(state.baseFindAt, now)) {
       state.baseFindAt = now;
       flagAndBroadcast(player,
-          "Base-finding: broke a block below the hide line (y=" + by + ")", "basefinding");
+          "Base-finding: broke a block below the hide line (y=" + blockY + ")", "basefinding");
     }
     trackDig(state, player, block, now);
     Material mat = block.getType();
@@ -276,18 +276,18 @@ public class BehaviorTracker implements Listener {
   }
 
   private void trackDig(State state, Player player, Block block, long now) {
-    int x = block.getX();
-    int y = block.getY();
-    int z = block.getZ();
-    if (state.digX == x && state.digZ == z && y == state.digY - 1
+    int blockX = block.getX();
+    int blockY = block.getY();
+    int blockZ = block.getZ();
+    if (state.digX == blockX && state.digZ == blockZ && blockY == state.digY - 1
         && now - state.digAt <= DIG_TIME_WINDOW_MS) {
       state.digStreak++;
     } else {
       state.digStreak = 1;
     }
-    state.digX = x;
-    state.digY = y;
-    state.digZ = z;
+    state.digX = blockX;
+    state.digY = blockY;
+    state.digZ = blockZ;
     state.digAt = now;
     if (state.digStreak >= MIN_DIG_STREAK && cooldownReady(state.baseFindAt, now)) {
       state.baseFindAt = now;

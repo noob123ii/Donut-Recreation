@@ -59,43 +59,43 @@ public final class FakeEntityManager {
     int entityId = entityIdCounter.getAndDecrement();
     UUID uuid = UUID.randomUUID();
 
-    double cx = blockLoc.getBlockX() + 0.5;
-    double cy = blockLoc.getBlockY() + 0.5;
-    double cz = blockLoc.getBlockZ() + 0.5;
+    double centerX = blockLoc.getBlockX() + 0.5;
+    double centerY = blockLoc.getBlockY() + 0.5;
+    double centerZ = blockLoc.getBlockZ() + 0.5;
     float yaw = 0f;
     float pitch = 0f;
 
     switch (facing) {
       case 0 -> {
         yaw = 0f;
-        cz += HANG_OFFSET;
+        centerZ += HANG_OFFSET;
       }
       case 1 -> {
         yaw = 90f;
-        cx -= HANG_OFFSET;
+        centerX -= HANG_OFFSET;
       }
       case 2 -> {
         yaw = 180f;
-        cz -= HANG_OFFSET;
+        centerZ -= HANG_OFFSET;
       }
       case 3 -> {
         yaw = 270f;
-        cx += HANG_OFFSET;
+        centerX += HANG_OFFSET;
       }
       case 4 -> {
         pitch = -90f;
-        cy += HANG_OFFSET;
+        centerY += HANG_OFFSET;
       }
       case 5 -> {
         pitch = 90f;
-        cy -= HANG_OFFSET;
+        centerY -= HANG_OFFSET;
       }
       default -> {}
     }
 
     com.github.retrooper.packetevents.protocol.world.Location packetLoc =
         new com.github.retrooper.packetevents.protocol.world.Location(
-            cx, cy, cz, yaw, pitch);
+            centerX, centerY, centerZ, yaw, pitch);
 
     int spawnData = facingToSpawnData(facing);
     try {

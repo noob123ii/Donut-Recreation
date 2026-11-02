@@ -98,25 +98,25 @@ public final class LitematicConverter {
     } else {
       return List.of();
     }
-    int sx = Math.abs(sxRaw);
-    int sy = Math.abs(syRaw);
-    int sz = Math.abs(szRaw);
+    int sizeX = Math.abs(sxRaw);
+    int sizeY = Math.abs(syRaw);
+    int sizeZ = Math.abs(szRaw);
     int offX = sxRaw < 0 ? sxRaw + 1 : 0;
     int offY = syRaw < 0 ? syRaw + 1 : 0;
     int offZ = szRaw < 0 ? szRaw + 1 : 0;
 
-    int px = 0;
-    int py = 0;
-    int pz = 0;
+    int originX = 0;
+    int originY = 0;
+    int originZ = 0;
     Object posObj = region.get("Position");
     if (posObj instanceof int[] arr && arr.length >= 3) {
-      px = arr[0];
-      py = arr[1];
-      pz = arr[2];
+      originX = arr[0];
+      originY = arr[1];
+      originZ = arr[2];
     } else if (posObj instanceof Map<?, ?> m) {
-      px = ((Number) m.get("x")).intValue();
-      py = ((Number) m.get("y")).intValue();
-      pz = ((Number) m.get("z")).intValue();
+      originX = ((Number) m.get("x")).intValue();
+      originY = ((Number) m.get("y")).intValue();
+      originZ = ((Number) m.get("z")).intValue();
     }
 
     List<Map<String, Object>> palette =
@@ -167,17 +167,17 @@ public final class LitematicConverter {
       bits = Math.max(2, 32 - Integer.numberOfLeadingZeros(names.length - 1));
     }
     long mask = (1L << bits) - 1;
-    int total = sx * sy * sz;
+    int total = sizeX * sizeY * sizeZ;
     List<StashManager.StashBlock> blocks = new ArrayList<>();
     if (bits == 0) {
       BlockData all = parseBlockData(names[0]);
       if (all != null) {
         for (int i = 0; i < total; i++) {
-          int bx = i % sx;
-          int bz = (i / sx) % sz;
-          int by = i / (sx * sz);
+          int baseX = i % sizeX;
+          int baseZ = (i / sizeX) % sizeZ;
+          int baseY = i / (sizeX * sizeZ);
           blocks.add(new StashManager.StashBlock(
-              bx + offX + px, by + offY + py, bz + offZ + pz, all));
+              baseX + offX + originX, baseY + offY + originY, baseZ + offZ + originZ, all));
         }
       }
       return blocks;
@@ -199,11 +199,11 @@ public final class LitematicConverter {
       if (data == null) {
         continue;
       }
-      int bx = i % sx;
-      int bz = (i / sx) % sz;
-      int by = i / (sx * sz);
+      int baseX = i % sizeX;
+      int baseZ = (i / sizeX) % sizeZ;
+      int baseY = i / (sizeX * sizeZ);
       blocks.add(new StashManager.StashBlock(
-          bx + offX + px, by + offY + py, bz + offZ + pz, data));
+          baseX + offX + originX, baseY + offY + originY, baseZ + offZ + originZ, data));
     }
     return blocks;
   }

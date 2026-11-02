@@ -9,13 +9,13 @@ import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection
 import com.notlucy.donutrecreation.spawn.manager.GhostBlockManager;
 
 public final class MultiBlockChangeHandler {
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
   private GhostBlockManager ghostBlockManager;
 
-  public MultiBlockChangeHandler(RevealManager rm, DeepslateProtection deepslate, AmethystProtection amethyst) {
-    this.rm = rm;
+  public MultiBlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate, AmethystProtection amethyst) {
+    this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
   }
@@ -24,7 +24,7 @@ public final class MultiBlockChangeHandler {
     this.ghostBlockManager = gbm;
   }
 
-  public boolean handle(PacketSendEvent event, Player player) {
+  public boolean handlePacket(PacketSendEvent event, Player player) {
     WrapperPlayServerMultiBlockChange wrapper = new WrapperPlayServerMultiBlockChange(event);
     if (!deepslate.isWrapperRelevant(wrapper)) {
       return false;
@@ -33,26 +33,30 @@ public final class MultiBlockChangeHandler {
     if (section == null) {
       return false;
     }
-    int cx = section.getX(), cz = section.getZ();
-    boolean chunkRevealed = rm.isRevealed(player, cx, cz);
-    boolean upperRevealed = rm.isUpperRevealed(player, cx, cz);
-    int salt = rm.saltFor(player.getUniqueId());
+    int chunkX = section.getX(), chunkZ = section.getZ();
+    boolean chunkRevealed = revealManager.isChunkRevealed(player, chunkX, chunkZ);
+    boolean upperRevealed = revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
+    int salt = revealManager.getPlayerSalt(player.getUniqueId());
     int floorFixes = 0, spawnerFixes = 0;
-    int floorId = deepslate.floorId(), spawnerId = deepslate.spawnerId();
+    int spawnerId = deepslate.spawnerId();
 
-    for (var enc : wrapper.getBlocks()) {
+    for (var encodedBlock : wrapper.getBlocks()) {
       if (ghostBlockManager != null
-          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), enc.getX(), enc.getY(), enc.getZ())) {
+          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), encodedBlock.getX(), encodedBlock.getY(), encodedBlock.getZ())) {
         continue;
       }
-      if (deepslate.shouldMaskMultiBlock(enc.getY(), chunkRevealed, upperRevealed)) {
-        int want = deepslate.floorIdAt(salt, enc.getX(), enc.getY(), enc.getZ());
-        if (enc.getBlockId() != want) {
-          enc.setBlockId(want);
-          floorFixes++;
+      if (deepslate.shouldMaskMultiBlock(encodedBlock.getY(), chunkRevealed, upperRevealed)) {
+        boolean bandSpawner = encodedBlock.getY() >= revealManager.hideBelowY() && encodedBlock.getBlockId() == spawnerId;
+        if (!bandSpawner) {
+          int want = deepslate.floorIdAt(salt, encodedBlock.getX(), encodedBlock.getY(), encodedBlock.getZ());
+          if (encodedBlock.getBlockId() != want) {
+            encodedBlock.setBlockId(want);
+            floorFixes++;
+          }
         }
-      } else if (enc.getY() > rm.spawnerMaskAboveY() && enc.getBlockId() == spawnerId) {
-        enc.setBlockId(floorId);
+      } else if (encodedBlock.getY() > revealManager.spawnerMaskAboveY() && encodedBlock.getBlockId() == spawnerId
+          && !deepslate.isNearSpawner(player, encodedBlock.getX(), encodedBlock.getY(), encodedBlock.getZ())) {
+        encodedBlock.setBlockId(deepslate.stoneId());
         spawnerFixes++;
       }
     }

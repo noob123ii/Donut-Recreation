@@ -20,23 +20,29 @@ public final class LightDebugProtection {
   }
 
   public static void stripFloorLight(LightData light, int minSection, int floorSection) {
-    if (light == null) {
-      return;
-    }
-    int span = floorSection - minSection + 1;
-    if (span <= 0) {
-      return;
-    }
+    stripSectionRange(light, minSection, floorSection, minSection);
+  }
 
+  /**
+   * Strips light data for an inclusive section range. Sections are absolute
+   * chunk-section indices (world Y >> 4); {@code minSection} is the lowest
+   * section present in the packet.
+   */
+  public static void stripSectionRange(
+      LightData light, int firstSection, int lastSection, int minSection) {
+    if (light == null || lastSection < firstSection) {
+      return;
+    }
     byte[][] block = light.getBlockLightArray();
     byte[][] sky = light.getSkyLightArray();
 
-    for (int i = 0; i < span; i++) {
-      int slot = i + 1;
+    int firstSlot = Math.max(1, firstSection - minSection + 1);
+    int lastSlot = Math.max(firstSlot, lastSection - minSection + 1);
+    for (int slot = firstSlot; slot <= lastSlot; slot++) {
       safeFillSlot(block, slot, FAKE_LIGHT_LEVEL);
       safeFillSlot(sky, slot, FAKE_LIGHT_LEVEL);
     }
-    clearLightMasks(light, span);
+    clearLightMaskRange(light, firstSlot, lastSlot);
   }
 
   public static void stripLightForSections(LightData light, BitSet sections) {
@@ -54,15 +60,14 @@ public final class LightDebugProtection {
     clearLightMasks(light, sections);
   }
 
-  private static void clearLightMasks(LightData light, int sectionsToClear) {
+  private static void clearLightMaskRange(LightData light, int firstSlot, int lastSlot) {
     byte[][] blockLight = light.getBlockLightArray();
     byte[][] skyLight = light.getSkyLightArray();
-    for (int i = 0; i < sectionsToClear; i++) {
-      int idx = i + 1;
-      if (blockLight != null && idx < blockLight.length && blockLight[idx] != null) {
+    for (int idx = firstSlot; idx <= lastSlot; idx++) {
+      if (blockLight != null && idx >= 0 && idx < blockLight.length && blockLight[idx] != null) {
         Arrays.fill(blockLight[idx], (byte) 0);
       }
-      if (skyLight != null && idx < skyLight.length && skyLight[idx] != null) {
+      if (skyLight != null && idx >= 0 && idx < skyLight.length && skyLight[idx] != null) {
         Arrays.fill(skyLight[idx], (byte) 0);
       }
     }
@@ -71,8 +76,7 @@ public final class LightDebugProtection {
       BitSet skyMask = light.getSkyLightMask();
       BitSet emptyBlockMask = light.getEmptyBlockLightMask();
       BitSet emptySkyMask = light.getEmptySkyLightMask();
-      for (int i = 0; i < sectionsToClear; i++) {
-        int idx = i + 1;
+      for (int idx = firstSlot; idx <= lastSlot; idx++) {
         if (blockMask != null) {
           blockMask.clear(idx);
         }

@@ -21,12 +21,12 @@ import com.notlucy.donutrecreation.util.LogData;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class AmethystProtection {
 
-  private final RevealManager rm;
-  private final BlockIdRegistry ids;
+  private final RevealManager revealManager;
+  private final BlockIdRegistry blockIds;
 
-  public AmethystProtection(RevealManager rm, BlockIdRegistry ids) {
-    this.rm = rm;
-    this.ids = ids;
+  public AmethystProtection(RevealManager revealManager, BlockIdRegistry blockIds) {
+    this.revealManager = revealManager;
+    this.blockIds = blockIds;
   }
 
   public boolean rewriteChunk(WrapperPlayServerChunkData wrapper, Player player) {
@@ -36,43 +36,43 @@ public final class AmethystProtection {
       LogData.get().warning("[geode] " + player.getName() + " null sections");
       return false;
     }
-    int cx = column.getX();
-    int cz = column.getZ();
-    int floorSection = rm.hideBelowY() >> 4;
-    int minSection = rm.worldMinY() >> 4;
+    int chunkX = column.getX();
+    int chunkZ = column.getZ();
+    int floorSection = revealManager.hideBelowY() >> 4;
+    int minSection = revealManager.worldMinY() >> 4;
 
-    long key = RevealManager.chunkKey(cx, cz);
-    Set<Long> positions = rm.geodePositions(key);
+    long key = RevealManager.chunkKey(chunkX, chunkZ);
+    Set<Long> positions = revealManager.geodePositions(key);
     BitSet litSections = new BitSet(sections.length);
 
-    if (positions == null || !rm.wasGeodeScanned(key)) {
+    if (positions == null || !revealManager.wasGeodeScanned(key)) {
       try {
-        positions = scanForAmethyst(sections, cx, cz, minSection, floorSection, litSections);
+        positions = scanForAmethyst(sections, chunkX, chunkZ, minSection, floorSection, litSections);
       } catch (Throwable e) {
-        LogData.get().warning("[geode] scan crashed at " + cx + "," + cz + ": " + e);
+        LogData.get().warning("[geode] scan crashed at " + chunkX + "," + chunkZ + ": " + e);
         return false;
       }
-      rm.recordGeodeChunk(key, positions);
-      if (!positions.isEmpty() && rm.verboseLogging()) {
-        LogData.get().info("[geode] discovered " + cx + "," + cz
+      revealManager.recordGeodePositions(key, positions);
+      if (!positions.isEmpty() && revealManager.verboseLogging()) {
+        LogData.get().info("[geode] discovered " + chunkX + "," + chunkZ
             + " (" + positions.size() + " nodes)");
       }
     } else if (!positions.isEmpty()) {
       for (long packed : positions) {
-        int idx = (RevealManager.unpackY(packed) >> 4) - minSection;
-        if (idx >= 0 && idx < sections.length) {
-          litSections.set(idx);
+        int sectionIndex = (RevealManager.unpackY(packed) >> 4) - minSection;
+        if (sectionIndex >= 0 && sectionIndex < sections.length) {
+          litSections.set(sectionIndex);
         }
       }
     }
 
-    if (positions.isEmpty() || rm.isGeodeRevealedFor(player, cx, cz)) {
+    if (positions.isEmpty() || revealManager.isGeodeVisibleTo(player, chunkX, chunkZ)) {
       return false;
     }
 
     enhanceGeodeBuds(sections, positions, minSection);
 
-    int swapped = maskPositions(sections, positions, minSection, rm.hideBelowY(), player.getWorld());
+    int swapped = maskPositions(sections, positions, minSection, revealManager.hideBelowY(), player.getWorld());
     if (swapped <= 0) {
       return false;
     }
@@ -82,37 +82,37 @@ public final class AmethystProtection {
       try {
         LightDebugProtection.stripLightForSections(light, litSections);
       } catch (Throwable e) {
-        LogData.get().warning("[geode] light strip crashed at " + cx + "," + cz + ": " + e);
+        LogData.get().warning("[geode] light strip crashed at " + chunkX + "," + chunkZ + ": " + e);
       }
     }
     int finalSwapped = swapped;
-    LogData.get().fine(() -> "[geode] hid " + finalSwapped + " block(s) for "
-        + player.getName() + " in " + cx + "," + cz
+    LogData.get().fine(() -> "[geode] hid " + finalSwapped + " block(section) for "
+        + player.getName() + " in " + chunkX + "," + chunkZ
         + " sections=" + sections.length + " lit=" + litSections.cardinality());
     return true;
   }
 
   public boolean rewriteBlockChange(
       WrapperPlayServerBlockChange wrapper, Player player, int x, int y, int z) {
-    if (!rm.geodeHideEnabled()) {
+    if (!revealManager.geodeHideEnabled()) {
       return false;
     }
 
     WrappedBlockState state = wrapper.getBlockState();
     int newId = state == null ? -1 : state.getGlobalId();
-    boolean nowAmethyst = ids.isAmethyst(newId);
+    boolean nowAmethyst = blockIds.isAmethyst(newId);
 
-    if (rm.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
+    if (revealManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
       return false;
     }
     long packed = RevealManager.packPos(x, y, z);
-    Set<Long> positions = rm.geodePositions(RevealManager.chunkKey(x >> 4, z >> 4));
+    Set<Long> positions = revealManager.geodePositions(RevealManager.chunkKey(x >> 4, z >> 4));
     boolean wasAmethyst = positions != null && positions.contains(packed);
 
     syncCache(nowAmethyst, wasAmethyst, x, y, z);
 
-    if ((nowAmethyst || wasAmethyst) && !rm.isGeodeRevealedFor(player, x >> 4, z >> 4)) {
-      int target = (y < rm.hideBelowY()) ? ids.floorId() : ids.stoneId();
+    if ((nowAmethyst || wasAmethyst) && !revealManager.isGeodeVisibleTo(player, x >> 4, z >> 4)) {
+      int target = (y < revealManager.hideBelowY()) ? blockIds.floorId() : blockIds.stoneId();
       wrapper.setBlockState(WrappedBlockState.getByGlobalId(target));
       return true;
     }
@@ -122,63 +122,63 @@ public final class AmethystProtection {
   public int rewriteMultiBlock(
       WrapperPlayServerMultiBlockChange wrapper, Player player,
       boolean chunkRevealed, int floorFixesAlready) {
-    if (!rm.geodeHideEnabled()) {
+    if (!revealManager.geodeHideEnabled()) {
       return 0;
     }
     var section = wrapper.getChunkPosition();
-    int cx = section.getX();
-    int cz = section.getZ();
-    boolean revealedHere = rm.isGeodeRevealedFor(player, cx, cz);
-    Set<Long> positions = rm.geodePositions(RevealManager.chunkKey(cx, cz));
+    int chunkX = section.getX();
+    int chunkZ = section.getZ();
+    boolean revealedHere = revealManager.isGeodeVisibleTo(player, chunkX, chunkZ);
+    Set<Long> positions = revealManager.geodePositions(RevealManager.chunkKey(chunkX, chunkZ));
 
     int swaps = 0;
-    int floorY = rm.hideBelowY();
+    int floorY = revealManager.hideBelowY();
 
     for (var enc : wrapper.getBlocks()) {
-      int by = enc.getY();
-      if (by < floorY && !chunkRevealed) {
+      int blockY = enc.getY();
+      if (blockY < floorY && !chunkRevealed) {
         continue;
       }
 
-      int bx = enc.getX();
-      int bz = enc.getZ();
-      if (rm.hasGhostBlockAt(player.getUniqueId(), bx, by, bz)) {
+      int blockX = enc.getX();
+      int blockZ = enc.getZ();
+      if (revealManager.hasGhostBlockAt(player.getUniqueId(), blockX, blockY, blockZ)) {
         continue;
       }
       int blockId = enc.getBlockId();
-      boolean nowAmethyst = ids.isAmethyst(blockId);
-      long packed = RevealManager.packPos(bx, by, bz);
+      boolean nowAmethyst = blockIds.isAmethyst(blockId);
+      long packed = RevealManager.packPos(blockX, blockY, blockZ);
       boolean wasAmethyst = positions != null && positions.contains(packed);
 
-      syncCache(nowAmethyst, wasAmethyst, bx, by, bz);
+      syncCache(nowAmethyst, wasAmethyst, blockX, blockY, blockZ);
 
       if (!revealedHere && (nowAmethyst || wasAmethyst)) {
-        int target = (by < floorY) ? ids.floorId() : ids.stoneId();
+        int target = (blockY < floorY) ? blockIds.floorId() : blockIds.stoneId();
         enc.setBlockId(target);
         swaps++;
       }
     }
     if (swaps > 0) {
       final int finalSwaps = swaps;
-      LogData.get().fine(() -> "[geode] multi swap=" + finalSwaps + " in " + cx + "," + cz
+      LogData.get().fine(() -> "[geode] multi swap=" + finalSwaps + " in " + chunkX + "," + chunkZ
           + " viewer=" + player.getName() + " floorFixes=" + floorFixesAlready);
     }
     return swaps;
   }
 
   private Set<Long> scanForAmethyst(
-      BaseChunk[] sections, int cx, int cz,
+      BaseChunk[] sections, int chunkX, int chunkZ,
       int minSection, int floorSection, BitSet litSections) {
     Set<Long> allAmethyst = new HashSet<>();
 
     int maxScanSection = floorSection + 10;
-    for (int i = 0; i < sections.length; i++) {
-      int sy = minSection + i;
-      if (sy < floorSection || sy > maxScanSection) {
+    for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+      int sectionY = minSection + sectionIndex;
+      if (sectionY < floorSection || sectionY > maxScanSection) {
         continue;
       }
-      BaseChunk s = sections[i];
-      if (s == null) {
+      BaseChunk section = sections[sectionIndex];
+      if (section == null) {
         continue;
       }
 
@@ -186,16 +186,16 @@ public final class AmethystProtection {
       for (int x = 0; x < 16; x++) {
         for (int y = 0; y < 16; y++) {
           for (int z = 0; z < 16; z++) {
-            int blockId = s.getBlockId(x, y, z);
-            if (ids.isAmethyst(blockId)) {
-              allAmethyst.add(RevealManager.packPos((cx << 4) + x, (sy << 4) + y, (cz << 4) + z));
+            int blockId = section.getBlockId(x, y, z);
+            if (blockIds.isAmethyst(blockId)) {
+              allAmethyst.add(RevealManager.packPos((chunkX << 4) + x, (sectionY << 4) + y, (chunkZ << 4) + z));
               any = true;
             }
           }
         }
       }
       if (any) {
-        litSections.set(i);
+        litSections.set(sectionIndex);
       }
     }
 
@@ -206,25 +206,25 @@ public final class AmethystProtection {
     }
 
     for (long packed : allAmethyst) {
-      int ax = RevealManager.unpackX(packed);
-      int ay = RevealManager.unpackY(packed);
-      int az = RevealManager.unpackZ(packed);
+      int amethystX = RevealManager.unpackX(packed);
+      int amethystY = RevealManager.unpackY(packed);
+      int amethystZ = RevealManager.unpackZ(packed);
       int neighbors = 0;
 
-      for (int dx = -1; dx <= 1; dx++) {
-        for (int dy = -1; dy <= 1; dy++) {
-          for (int dz = -1; dz <= 1; dz++) {
-            if (dx == 0 && dy == 0 && dz == 0) continue;
-            long neighborPacked = RevealManager.packPos(ax + dx, ay + dy, az + dz);
+      for (int offsetX = -1; offsetX <= 1; offsetX++) {
+        for (int offsetY = -1; offsetY <= 1; offsetY++) {
+          for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+            if (offsetX == 0 && offsetY == 0 && offsetZ == 0) continue;
+            long neighborPacked = RevealManager.packPos(amethystX + offsetX, amethystY + offsetY, amethystZ + offsetZ);
 
             if (allAmethyst.contains(neighborPacked)) {
               neighbors++;
             } else {
 
-              int neighborCx = (ax + dx) >> 4;
-              int neighborCz = (az + dz) >> 4;
-              if (neighborCx != cx || neighborCz != cz) {
-                Set<Long> neighborChunkPos = rm.geodePositions(RevealManager.chunkKey(neighborCx, neighborCz));
+              int neighborCx = (amethystX + offsetX) >> 4;
+              int neighborCz = (amethystZ + offsetZ) >> 4;
+              if (neighborCx != chunkX || neighborCz != chunkZ) {
+                Set<Long> neighborChunkPos = revealManager.geodePositions(RevealManager.chunkKey(neighborCx, neighborCz));
                 if (neighborChunkPos != null && neighborChunkPos.contains(neighborPacked)) {
                   neighbors++;
                 }
@@ -243,27 +243,27 @@ public final class AmethystProtection {
   }
 
   private void enhanceGeodeBuds(BaseChunk[] sections, Set<Long> positions, int minSection) {
-    int largeBudId = ids.largeBudId();
+    int largeBudId = blockIds.largeBudId();
     int replaced = 0;
     for (long packed : positions) {
-      int wx = RevealManager.unpackX(packed);
-      int wy = RevealManager.unpackY(packed);
-      int wz = RevealManager.unpackZ(packed);
-      int idx = (wy >> 4) - minSection;
-      if (idx < 0 || idx >= sections.length) continue;
-      BaseChunk s = sections[idx];
-      if (s == null) continue;
-      int lx = wx & 0xF;
-      int ly = wy & 0xF;
-      int lz = wz & 0xF;
-      int currentId = s.getBlockId(lx, ly, lz);
-      if (ids.isAmethyst(currentId) && currentId != ids.decoyClusterId()
-          && currentId != ids.amethystBlockId()) {
-        int h = (wx * 374761393 ^ wz * 668265263 ^ wy * 1274126177);
-        h = (h ^ (h >> 13)) * 1274126177;
-        h = h ^ (h >> 16);
-        if ((h & 0x7FFFFFFF) % 9 == 0) {
-          s.set(lx, ly, lz, largeBudId);
+      int worldX = RevealManager.unpackX(packed);
+      int worldY = RevealManager.unpackY(packed);
+      int worldZ = RevealManager.unpackZ(packed);
+      int sectionIndex = (worldY >> 4) - minSection;
+      if (sectionIndex < 0 || sectionIndex >= sections.length) continue;
+      BaseChunk section = sections[sectionIndex];
+      if (section == null) continue;
+      int localX = worldX & 0xF;
+      int localY = worldY & 0xF;
+      int localZ = worldZ & 0xF;
+      int currentId = section.getBlockId(localX, localY, localZ);
+      if (blockIds.isAmethyst(currentId) && currentId != blockIds.decoyClusterId()
+          && currentId != blockIds.amethystBlockId()) {
+        int hash = (worldX * 374761393 ^ worldZ * 668265263 ^ worldY * 1274126177);
+        hash = (hash ^ (hash >> 13)) * 1274126177;
+        hash = hash ^ (hash >> 16);
+        if ((hash & 0x7FFFFFFF) % 9 == 0) {
+          section.set(localX, localY, localZ, largeBudId);
           replaced++;
         }
       }
@@ -273,26 +273,26 @@ public final class AmethystProtection {
   private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection, int floorY, World world) {
     int swapped = 0;
     for (long packed : positions) {
-      int wx = RevealManager.unpackX(packed);
-      int wy = RevealManager.unpackY(packed);
-      int wz = RevealManager.unpackZ(packed);
+      int worldX = RevealManager.unpackX(packed);
+      int worldY = RevealManager.unpackY(packed);
+      int worldZ = RevealManager.unpackZ(packed);
 
-      int idx = (wy >> 4) - minSection;
-      if (idx < 0 || idx >= sections.length) {
+      int sectionIndex = (worldY >> 4) - minSection;
+      if (sectionIndex < 0 || sectionIndex >= sections.length) {
         continue;
       }
-      BaseChunk s = sections[idx];
-      if (s == null) {
+      BaseChunk section = sections[sectionIndex];
+      if (section == null) {
         continue;
       }
-      int lx = wx & 0xF;
-      int ly = wy & 0xF;
-      int lz = wz & 0xF;
-      if (!ids.isAmethyst(s.getBlockId(lx, ly, lz))) {
+      int localX = worldX & 0xF;
+      int localY = worldY & 0xF;
+      int localZ = worldZ & 0xF;
+      if (!blockIds.isAmethyst(section.getBlockId(localX, localY, localZ))) {
         continue;
       }
-      int target = (wy < floorY) ? ids.floorId() : ids.stoneId();
-      s.set(lx, ly, lz, target);
+      int target = (worldY < floorY) ? blockIds.floorId() : blockIds.stoneId();
+      section.set(localX, localY, localZ, target);
       swapped++;
     }
     return swapped;
@@ -300,9 +300,9 @@ public final class AmethystProtection {
 
   private void syncCache(boolean nowAmethyst, boolean wasAmethyst, int x, int y, int z) {
     if (nowAmethyst && !wasAmethyst) {
-      rm.recordAmethystAt(x, y, z);
+      revealManager.rememberAmethystBlock(x, y, z);
     } else if (!nowAmethyst && wasAmethyst) {
-      rm.forgetAmethystAt(x, y, z);
+      revealManager.forgetAmethystBlock(x, y, z);
     }
   }
 }

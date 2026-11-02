@@ -11,13 +11,13 @@ import org.bukkit.entity.Player;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class WorldEffectDamper {
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
 
-  public WorldEffectDamper(RevealManager rm) {
-    this.rm = rm;
+  public WorldEffectDamper(RevealManager revealManager) {
+    this.revealManager = revealManager;
   }
 
-  public boolean handle(PacketSendEvent event, Player viewer) {
+  public boolean handlePacket(PacketSendEvent event, Player viewer) {
     if (viewer == null) {
       return false;
     }
@@ -37,16 +37,16 @@ public final class WorldEffectDamper {
     } catch (Throwable ignored) {
       return false;
     }
-    Vector3i pos;
+    Vector3i position;
     try {
-      pos = wrapper.getPosition();
+      position = wrapper.getPosition();
     } catch (Throwable ignored) {
       return false;
     }
-    if (pos == null) {
+    if (position == null) {
       return false;
     }
-    if (rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ())) {
+    if (revealManager.isPositionHidden(viewer, position.getX(), position.getY(), position.getZ())) {
       event.setCancelled(true);
       return true;
     }
@@ -60,16 +60,16 @@ public final class WorldEffectDamper {
     } catch (Throwable ignored) {
       return false;
     }
-    Vector3i pos;
+    Vector3i position;
     try {
-      pos = wrapper.getBlockPosition();
+      position = wrapper.getBlockPosition();
     } catch (Throwable ignored) {
       return false;
     }
-    if (pos == null) {
+    if (position == null) {
       return false;
     }
-    if (rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ())) {
+    if (revealManager.isPositionHidden(viewer, position.getX(), position.getY(), position.getZ())) {
       event.setCancelled(true);
       return true;
     }

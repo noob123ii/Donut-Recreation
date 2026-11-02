@@ -9,7 +9,7 @@ a punishment system with alt-evasion detection and configurable full-screen ban 
 [PacketEvents](https://github.com/retrooper/packetevents) — the real world on disk is
 never touched.
 
-Tested on **Paper 1.21.4**. Requires **Java 21**.
+Tested on **Paper 26.3** (build 237) and **PacketEvents 2.14.0**. Requires **Java 25**.
 
 ---
 
@@ -90,7 +90,22 @@ suppressed or re-spatialised.
 **Salt rotation:** Noise pattern is salted per-player and rotates periodically (default
 12,000 ticks). Prevents clients from building a static map of the fake floor.
 
-**Bypass:** Staff with `donutrecreation.hider.bypass` see the real world.
+**Automatic re-masking:** Revealed chunks outside the current reveal area are masked again
+as the player moves away or climbs back above the barrier, so previously seen caves cannot
+be kept visible with a freecam client.
+
+**Masking:** Every viewer sees the masked world below the configured floor; there is no
+client-side bypass permission.
+
+### Packet coverage
+
+Every block-bearing packet is filtered on the wire, including chunk data, light updates,
+single and multi block changes, block entity data, block actions, break animations,
+sign updates, transient blocks, `/debug` block/chunk/entity values and game-test
+highlights. Entity packets are filtered too: all modern spawn packets (generic, living,
+player, experience orb, painting, weather), position sync / teleport / relative movement,
+metadata, equipment, status, velocity, effects, passengers, NBT and destroy packets.
+Block-entity, sound, particle and explosion packets are masked for unrevealed regions.
 
 ---
 
@@ -162,6 +177,8 @@ Output: `build/libs/DonutRecreation.jar`
 - `hider.hide-below-y` / `hider.barrier-upper-y` — barrier thresholds
 - `hider.flood-fill-budget` — lower for less CPU, raise for better cave reveal
 - `hider.max-revealed-chunks-per-player` — memory vs coverage tradeoff
+- `hider.max-reveal-per-recompute` / `hider.max-hide-per-recompute` — packet budget per
+  update; keeps large reveals/masks from causing a tick spike
 - `punishments:` — reason/duration/data-wipe per offence type
 - `ban-message` — ban screen template (`%reason%`, `%duration%`, `%time_remaining%`, `%ban_id%`)
 - `alt-ban-policy` — strict / new-accounts-only / flag-only

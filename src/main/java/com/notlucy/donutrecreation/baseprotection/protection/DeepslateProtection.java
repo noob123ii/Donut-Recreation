@@ -20,12 +20,12 @@ import com.notlucy.donutrecreation.util.LogData;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class DeepslateProtection {
 
-  private final RevealManager rm;
-  private final BlockIdRegistry ids;
+  private final RevealManager revealManager;
+  private final BlockIdRegistry blockIds;
 
-  public DeepslateProtection(RevealManager rm, BlockIdRegistry ids) {
-    this.rm = rm;
-    this.ids = ids;
+  public DeepslateProtection(RevealManager revealManager, BlockIdRegistry blockIds) {
+    this.revealManager = revealManager;
+    this.blockIds = blockIds;
   }
 
   public boolean rewriteChunk(
@@ -43,50 +43,50 @@ public final class DeepslateProtection {
       return false;
     }
 
-    int cx = column.getX();
-    int cz = column.getZ();
-    int floorY = rm.hideBelowY();
-    int upperY = rm.upperBarrierY();
+    int chunkX = column.getX();
+    int chunkZ = column.getZ();
+    int floorY = revealManager.hideBelowY();
+    int upperY = revealManager.upperBarrierY();
     int floorSection = floorY >> 4;
-    int minSection = rm.worldMinY() >> 4;
-    int worldOriginX = cx << 4;
-    int worldOriginZ = cz << 4;
-    int salt = rm.saltFor(player.getUniqueId());
+    int minSection = revealManager.worldMinY() >> 4;
+    int worldOriginX = chunkX << 4;
+    int worldOriginZ = chunkZ << 4;
+    int salt = revealManager.getPlayerSalt(player.getUniqueId());
     long worldSeed = player.getWorld().getSeed();
-    boolean geodeChunk = Math.abs(geodeNoise(cx, 999, cz, salt) % 100) <= 8;
-    int[] geodeBudget = {rm.fakeGeodeAmethystPerChunk()};
-    boolean lowerRevealed = rm.isRevealed(player, cx, cz);
-    boolean upperRevealed = rm.isUpperRevealed(player, cx, cz);
+    boolean geodeChunk = Math.abs(geodeNoise(chunkX, 999, chunkZ, salt) % 100) <= 8;
+    int[] geodeBudget = {revealManager.fakeGeodeAmethystPerChunk()};
+    boolean lowerRevealed = revealManager.isChunkRevealed(player, chunkX, chunkZ);
+    boolean upperRevealed = revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
     boolean upperActive = upperY > floorY;
 
     boolean touched = false;
     int modifiedSections = 0;
     int nullSections = 0;
-    for (int i = 0; i < sections.length; i++) {
-      BaseChunk section = sections[i];
-      int sy = minSection + i;
+    for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
+      BaseChunk section = sections[sectionIndex];
+      int sectionY = minSection + sectionIndex;
       if (section == null) {
-        if (!lowerRevealed && sy <= floorSection) {
+        if (!lowerRevealed && sectionY <= floorSection) {
           nullSections++;
         }
         continue;
       }
-      int worldOriginY = sy << 4;
+      int worldOriginY = sectionY << 4;
 
       if (!lowerRevealed) {
-        int hi = Math.min(16, floorY - worldOriginY);
-        if (hi > 0) {
-          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, 0, hi,
+        int toY = Math.min(16, floorY - worldOriginY);
+        if (toY > 0) {
+          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, 0, toY,
               salt, player, geodeChunk, geodeBudget);
           touched = true;
           modifiedSections++;
         }
       }
       if (upperActive && !upperRevealed) {
-        int lo = Math.max(0, floorY - worldOriginY);
-        int hi = Math.min(16, upperY - worldOriginY);
-        if (hi > lo) {
-          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, lo, hi,
+        int fromY = Math.max(0, floorY - worldOriginY);
+        int toY = Math.min(16, upperY - worldOriginY);
+        if (toY > fromY) {
+          fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, fromY, toY,
               salt, player, geodeChunk, geodeBudget);
           touched = true;
           modifiedSections++;
@@ -94,19 +94,19 @@ public final class DeepslateProtection {
       }
 
       if ((lowerRevealed || upperRevealed) && env == org.bukkit.World.Environment.NORMAL) {
-        int lo = Math.max(0, floorY - worldOriginY);
-        int hi = Math.min(16, upperY - worldOriginY);
-        if (hi > lo) {
-          if (shouldHideOresInChunk(worldSeed, cx, cz)) {
-            int stoneId = ids.stoneId();
+        int fromY = Math.max(0, floorY - worldOriginY);
+        int toY = Math.min(16, upperY - worldOriginY);
+        if (toY > fromY) {
+          if (shouldHideOresInChunk(worldSeed, chunkX, chunkZ)) {
+            int stoneId = blockIds.stoneId();
             int oreMasked = 0;
             for (int x = 0; x < 16; x++) {
-              int wx = worldOriginX + x;
+              int worldX = worldOriginX + x;
               for (int z = 0; z < 16; z++) {
-                int wz = worldOriginZ + z;
-                for (int y = lo; y < hi; y++) {
+                int worldZ = worldOriginZ + z;
+                for (int y = fromY; y < toY; y++) {
                   int blockId = section.getBlockId(x, y, z);
-                  if (ids.isOre(blockId) && shouldHideOre(worldSeed, cx, cz, wx, worldOriginY + y, wz)) {
+                  if (blockIds.isOre(blockId) && shouldHideOre(worldSeed, chunkX, chunkZ, worldX, worldOriginY + y, worldZ)) {
                     section.set(x, y, z, stoneId);
                     oreMasked++;
                   }
@@ -116,23 +116,24 @@ public final class DeepslateProtection {
             if (oreMasked > 0) {
               touched = true;
               final int masked = oreMasked;
-              LogData.get().fine(() -> "[ore] masked " + masked + " ores in " + cx + "," + cz);
+              LogData.get().fine(() -> "[ore] masked " + masked + " ores in " + chunkX + "," + chunkZ);
             }
           }
         }
       }
 
-      int aboveY = rm.spawnerMaskAboveY();
-      int spawnerFloorId = ids.floorId();
+      int aboveY = revealManager.spawnerMaskAboveY();
+      int spawnerStoneId = blockIds.stoneId();
       int spawnerMasked = 0;
       for (int x = 0; x < 16; x++) {
         for (int z = 0; z < 16; z++) {
           for (int y = 0; y < 16; y++) {
-            if (section.getBlockId(x, y, z) != ids.spawnerId()) {
+            if (section.getBlockId(x, y, z) != blockIds.spawnerId()) {
               continue;
             }
-            if (worldOriginY + y > aboveY) {
-              section.set(x, y, z, spawnerFloorId);
+            int worldY = worldOriginY + y;
+            if (worldY > aboveY && !isNearSpawner(player, worldOriginX + x, worldY, worldOriginZ + z)) {
+              section.set(x, y, z, spawnerStoneId);
               spawnerMasked++;
             }
           }
@@ -144,18 +145,23 @@ public final class DeepslateProtection {
     }
 
     if (touched || nullSections > 0) {
-      if (!lowerRevealed) {
-        try {
-          LightDebugProtection.stripFloorLight(wrapper, minSection, floorSection);
-        } catch (Exception e) {
-          LogData.get().warning("[deepslate] light strip failed at " + cx + "," + cz + ": " + e);
+      try {
+        var light = wrapper.getLightData();
+        if (!lowerRevealed) {
+          LightDebugProtection.stripFloorLight(light, minSection, (floorY - 1) >> 4);
         }
+        if (upperActive && !upperRevealed) {
+          LightDebugProtection.stripSectionRange(
+              light, Math.max(minSection, floorSection), (upperY - 1) >> 4, minSection);
+        }
+      } catch (Exception e) {
+        LogData.get().warning("[deepslate] light strip failed at " + chunkX + "," + chunkZ + ": " + e);
       }
       if (nullSections > 0) {
-        int py = player.getLocation().getBlockY();
+        int playerY = player.getLocation().getBlockY();
         LogData.get().warning("[deepslate] " + player.getName()
-            + " chunk=" + cx + "," + cz + " NULL sections below floor=" + nullSections
-            + " playerY=" + py);
+            + " chunk=" + chunkX + "," + chunkZ + " NULL sections below floor=" + nullSections
+            + " playerY=" + playerY);
       }
     }
     return touched || nullSections > 0;
@@ -163,33 +169,37 @@ public final class DeepslateProtection {
 
   public boolean rewriteBlockChange(
       WrapperPlayServerBlockChange wrapper, Player player, int x, int y, int z) {
-    int floorY = rm.hideBelowY();
-    int cx = x >> 4;
-    int cz = z >> 4;
-    int salt = rm.saltFor(player.getUniqueId());
+    int floorY = revealManager.hideBelowY();
+    int chunkX = x >> 4;
+    int chunkZ = z >> 4;
+    int salt = revealManager.getPlayerSalt(player.getUniqueId());
     if (y < floorY) {
-      if (rm.isRevealed(player, cx, cz)) {
+      if (revealManager.isChunkRevealed(player, chunkX, chunkZ)) {
         return false;
       }
-      wrapper.setBlockState(WrappedBlockState.getByGlobalId(ids.floorIdAt(salt, x, y, z)));
+      wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.floorIdAt(salt, x, y, z)));
       return true;
     }
-    int upperY = rm.upperBarrierY();
+    int upperY = revealManager.upperBarrierY();
     if (upperY > floorY && y < upperY) {
-      if (rm.isUpperRevealed(player, cx, cz)) {
+      if (revealManager.isBarrierBandRevealed(player, chunkX, chunkZ)) {
         return false;
       }
-      wrapper.setBlockState(WrappedBlockState.getByGlobalId(ids.floorIdAt(salt, x, y, z)));
+      var state = wrapper.getBlockState();
+      if (state != null && blockIds.isSpawner(state.getGlobalId())) {
+        return false;
+      }
+      wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.floorIdAt(salt, x, y, z)));
       return true;
     }
     return false;
   }
 
-  public boolean shouldMaskMultiBlock(int by, boolean lowerRevealed, boolean upperRevealed) {
-    int floorY = rm.hideBelowY();
-    if (by < floorY) return !lowerRevealed;
-    int upperY = rm.upperBarrierY();
-    return upperY > floorY && by < upperY && !upperRevealed;
+  public boolean shouldMaskMultiBlock(int blockY, boolean lowerRevealed, boolean upperRevealed) {
+    int floorY = revealManager.hideBelowY();
+    if (blockY < floorY) return !lowerRevealed;
+    int upperY = revealManager.upperBarrierY();
+    return upperY > floorY && blockY < upperY && !upperRevealed;
   }
 
   private void fillNoise(
@@ -198,27 +208,27 @@ public final class DeepslateProtection {
       boolean geodeChunk, int[] geodeBudget) {
     java.util.UUID playerId = player.getUniqueId();
     for (int x = 0; x < 16; x++) {
-      int wx = worldOriginX + x;
+      int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
-        int wz = worldOriginZ + z;
+        int worldZ = worldOriginZ + z;
         for (int y = lowY; y < highY; y++) {
-          int wy = worldOriginY + y;
-          if (rm.hasGhostBlockAt(playerId, wx, wy, wz)) {
+          int worldY = worldOriginY + y;
+          if (revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
             continue;
           }
-          if (section.getBlockId(x, y, z) == ids.spawnerId()) {
+          if (section.getBlockId(x, y, z) == blockIds.spawnerId()) {
             continue;
           }
           int geodeBlock = 0;
           if (geodeChunk && geodeBudget[0] > 0) {
-            int h = geodeNoise(wx, wy, wz, salt);
-            if ((h & 0x7FFFFFFF) % 64 == 0) {
-              geodeBlock = fakeAmethystVariant(h);
+            int hash = geodeNoise(worldX, worldY, worldZ, salt);
+            if ((hash & 0x7FFFFFFF) % 64 == 0) {
+              geodeBlock = fakeAmethystVariant(hash);
               geodeBudget[0]--;
             }
           }
           if (geodeBlock == 0) {
-            geodeBlock = ids.floorIdAt(salt, wx, wy, wz);
+            geodeBlock = blockIds.floorIdAt(salt, worldX, worldY, worldZ);
           }
           if (section.getBlockId(x, y, z) != geodeBlock) {
             section.set(x, y, z, geodeBlock);
@@ -228,37 +238,49 @@ public final class DeepslateProtection {
     }
   }
 
-  private int fakeAmethystVariant(int h) {
-    int r = (h & 0x7FFFFFFF) % 12;
-    if (r == 0) return ids.buddingAmethystId();
-    if (r == 1) return ids.decoyClusterId();
-    if (r == 2) return ids.smallBudId();
-    if (r == 3) return ids.mediumBudId();
-    if (r == 4) return ids.largeBudId();
-    return ids.amethystBlockId();
+  private int fakeAmethystVariant(int hash) {
+    int variant = (hash & 0x7FFFFFFF) % 12;
+    if (variant == 0) return blockIds.buddingAmethystId();
+    if (variant == 1) return blockIds.decoyClusterId();
+    if (variant == 2) return blockIds.smallBudId();
+    if (variant == 3) return blockIds.mediumBudId();
+    if (variant == 4) return blockIds.largeBudId();
+    return blockIds.amethystBlockId();
   }
 
   private static int geodeNoise(int x, int y, int z, int salt) {
-    int h = (x * 374761393 ^ z * 668265263 ^ y * 1274126177) + salt;
-    h = (h ^ (h >> 13)) * 1274126177;
-    h = h ^ (h >> 16);
-    return h;
+    int hash = (x * 374761393 ^ z * 668265263 ^ y * 1274126177) + salt;
+    hash = (hash ^ (hash >> 13)) * 1274126177;
+    hash = hash ^ (hash >> 16);
+    return hash;
   }
 
   public int floorId() {
-    return ids.floorId();
+    return blockIds.floorId();
   }
 
-  public boolean isSpawner(int id) {
-    return ids.isSpawner(id);
+  public boolean isSpawner(int blockId) {
+    return blockIds.isSpawner(blockId);
   }
 
   public int spawnerId() {
-    return ids.spawnerId();
+    return blockIds.spawnerId();
   }
 
   public int floorIdAt(int salt, int x, int y, int z) {
-    return ids.floorIdAt(salt, x, y, z);
+    return blockIds.floorIdAt(salt, x, y, z);
+  }
+
+  public int stoneId() {
+    return blockIds.stoneId();
+  }
+
+  public boolean isNearSpawner(Player player, int x, int y, int z) {
+    org.bukkit.Location location = player.getLocation();
+    long offsetX = location.getBlockX() - x;
+    long offsetY = location.getBlockY() - y;
+    long offsetZ = location.getBlockZ() - z;
+    return offsetX * offsetX + offsetY * offsetY + offsetZ * offsetZ <= revealManager.spawnerRevealDistanceSq();
   }
 
   public boolean isWrapperRelevant(WrapperPlayServerMultiBlockChange wrapper) {

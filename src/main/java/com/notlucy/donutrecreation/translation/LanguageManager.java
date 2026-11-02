@@ -24,16 +24,16 @@ public final class LanguageManager {
     this.onChange = onChange;
   }
 
-  public String getLang(UUID id) {
-    return langs.getOrDefault(id, DEFAULT);
+  public String getLang(UUID playerId) {
+    return langs.getOrDefault(playerId, DEFAULT);
   }
 
-  public void setLang(UUID id, String lang) {
+  public void setLang(UUID playerId, String lang) {
     String norm = lang.toLowerCase(Locale.ROOT);
-    String prev = langs.put(id, norm);
+    String prev = langs.put(playerId, norm);
     if (prev == null || !prev.equals(norm)) {
       save();
-      if (onChange != null) onChange.accept(id, norm);
+      if (onChange != null) onChange.accept(playerId, norm);
     }
   }
 

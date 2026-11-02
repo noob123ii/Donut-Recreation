@@ -98,7 +98,7 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
       }
     }
     if (ip == null && store != null) {
-      ip = store.lastIpFor(target.getUniqueId());
+      ip = store.lastIpFor(targetId);
     }
 
     long expiresAt = expiry == null ? -1L : expiry.getTime();
@@ -157,10 +157,10 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
       }
     }
 
-    String banIdStr = store != null && store.lastBanFor(targetId) != null
-        ? store.lastBanFor(targetId).banId : "?";
+    PlayerDataStore.BanRecord storedBan = store != null ? store.lastBanFor(targetId) : null;
+    String banIdStr = storedBan != null ? storedBan.banId : "?";
     Bukkit.getOnlinePlayers().stream()
-        .filter(p -> p.hasPermission("donutrecreation.*"))
+        .filter(player -> player.hasPermission("donutrecreation.*"))
         .forEach(op -> op.sendMessage(plugin.color(
             "&c[&4PUNISH&c] &f" + sender.getName() + " &7punished &f" + displayName
                 + " &7for &f" + key + " &7(&f" + banTime + "&7"
@@ -179,10 +179,10 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
     }
     if (args.length == 1) {
       List<String> names = new ArrayList<>();
-      for (Player p : Bukkit.getOnlinePlayers()) {
-        if (p.getName().toLowerCase(Locale.ROOT)
+      for (Player player : Bukkit.getOnlinePlayers()) {
+        if (player.getName().toLowerCase(Locale.ROOT)
             .startsWith(args[0].toLowerCase(Locale.ROOT))) {
-          names.add(p.getName());
+          names.add(player.getName());
         }
       }
       return names;
@@ -265,29 +265,34 @@ public class PunishCommand implements CommandExecutor, TabCompleter {
   }
 
   private long[] parseUnits(String text) {
-    int i = 0;
+    int index = 0;
     long total = 0;
-    while (i < text.length()) {
-      int start = i;
-      while (i < text.length() && Character.isDigit(text.charAt(i))) {
-        i++;
+    while (index < text.length()) {
+      int start = index;
+      while (index < text.length() && Character.isDigit(text.charAt(index))) {
+        index++;
       }
-      if (start == i) {
+      if (start == index) {
         return null;
       }
-      long value = Long.parseLong(text.substring(start, i));
-      int unitStart = i;
-      while (i < text.length() && Character.isLetter(text.charAt(i))) {
-        i++;
-      }
-      String unit = text.substring(unitStart, i);
-      long ms = unitMs(unit, value);
-      if (ms < 0) {
+      long value;
+      try {
+        value = Long.parseLong(text.substring(start, index));
+      } catch (NumberFormatException error) {
         return null;
       }
-      total += ms;
-      while (i < text.length() && !Character.isDigit(text.charAt(i))) {
-        i++;
+      int unitStart = index;
+      while (index < text.length() && Character.isLetter(text.charAt(index))) {
+        index++;
+      }
+      String unit = text.substring(unitStart, index);
+      long durationMillis = unitMs(unit, value);
+      if (durationMillis < 0) {
+        return null;
+      }
+      total += durationMillis;
+      while (index < text.length() && !Character.isDigit(text.charAt(index))) {
+        index++;
       }
     }
     return total == 0 ? null : new long[]{total};

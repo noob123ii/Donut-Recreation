@@ -26,10 +26,9 @@ public class SusFlagManager {
   }
 
   public void flag(UUID uuid, String name, String reason, String category) {
-    SusFlag last = flags.get(uuid);
-    int count = last == null ? 1 : last.count() + 1;
     String cat = (category != null) ? category : "custom";
-    flags.put(uuid, new SusFlag(uuid, name, reason, count, Instant.now(), cat));
+    flags.compute(uuid, (id, last) -> new SusFlag(
+        id, name, reason, last == null ? 1 : last.count() + 1, Instant.now(), cat));
   }
 
   public SusFlag getFlag(UUID targetId) {

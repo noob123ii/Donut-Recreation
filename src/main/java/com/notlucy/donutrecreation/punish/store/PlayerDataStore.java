@@ -10,7 +10,6 @@ import java.util.Deque;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -178,12 +177,13 @@ public final class PlayerDataStore {
 
     private static org.bukkit.inventory.ItemStack[] toArray(
         List<org.bukkit.inventory.ItemStack> list, int expected) {
+      org.bukkit.inventory.ItemStack[] out = new org.bukkit.inventory.ItemStack[expected];
       if (list == null) {
-        return new org.bukkit.inventory.ItemStack[expected];
+        return out;
       }
-      org.bukkit.inventory.ItemStack[] out = new org.bukkit.inventory.ItemStack[list.size()];
-      for (int i = 0; i < list.size(); i++) {
-        out[i] = list.get(i);
+      int size = Math.min(list.size(), expected);
+      for (int index = 0; index < size; index++) {
+        out[index] = list.get(index);
       }
       return out;
     }
@@ -241,12 +241,12 @@ public final class PlayerDataStore {
     }
   }
 
-  public void recordJoin(UUID id, String name, String ip) {
-    if (id == null) {
+  public void recordJoin(UUID playerId, String name, String ip) {
+    if (playerId == null) {
       return;
     }
     long now = System.currentTimeMillis();
-    Profile profile = profiles.computeIfAbsent(id, k -> {
+    Profile profile = profiles.computeIfAbsent(playerId, k -> {
       Profile fresh = new Profile();
       fresh.firstSeenAt = now;
       return fresh;
@@ -266,8 +266,8 @@ public final class PlayerDataStore {
       }
       Deque<UUID> bucket = ips.computeIfAbsent(ip, k -> new ArrayDeque<>());
       synchronized (bucket) {
-        bucket.remove(id);
-        bucket.addFirst(id);
+        bucket.remove(playerId);
+        bucket.addFirst(playerId);
         while (bucket.size() > UUID_HISTORY_PER_IP) {
           bucket.pollLast();
         }
@@ -276,11 +276,11 @@ public final class PlayerDataStore {
     dirty = true;
   }
 
-  public void recordFingerprint(UUID id, String fingerprint) {
-    if (id == null || fingerprint == null) {
+  public void recordFingerprint(UUID playerId, String fingerprint) {
+    if (playerId == null || fingerprint == null) {
       return;
     }
-    Profile profile = profiles.computeIfAbsent(id, k -> {
+    Profile profile = profiles.computeIfAbsent(playerId, k -> {
       Profile fresh = new Profile();
       fresh.firstSeenAt = System.currentTimeMillis();
       return fresh;
@@ -297,11 +297,11 @@ public final class PlayerDataStore {
     load();
   }
 
-  public void removeBan(UUID id) {
-    if (id == null) {
+  public void removeBan(UUID playerId) {
+    if (playerId == null) {
       return;
     }
-    BanRecord removed = bans.remove(id);
+    BanRecord removed = bans.remove(playerId);
     if (removed != null && removed.banId != null) {
       banIndex.remove(removed.banId);
     }
@@ -319,8 +319,8 @@ public final class PlayerDataStore {
     return banIndex.get(banId);
   }
 
-  public BanRecord lastBanFor(UUID id) {
-    return bans.get(id);
+  public BanRecord lastBanFor(UUID playerId) {
+    return bans.get(playerId);
   }
 
   public void recordBan(BanRecord ban) {
@@ -359,11 +359,11 @@ public final class PlayerDataStore {
     dirty = true;
   }
 
-  public BanRecord activeBanFor(UUID id) {
-    if (id == null) {
+  public BanRecord activeBanFor(UUID playerId) {
+    if (playerId == null) {
       return null;
     }
-    BanRecord ban = bans.get(id);
+    BanRecord ban = bans.get(playerId);
     return (ban != null && ban.isActive(System.currentTimeMillis())) ? ban : null;
   }
 
@@ -380,11 +380,11 @@ public final class PlayerDataStore {
       snapshot = new ArrayList<>(bucket);
     }
     long now = System.currentTimeMillis();
-    for (UUID id : snapshot) {
-      if (id.equals(excluding)) {
+    for (UUID playerId : snapshot) {
+      if (playerId.equals(excluding)) {
         continue;
       }
-      BanRecord ban = bans.get(id);
+      BanRecord ban = bans.get(playerId);
       if (ban != null && ban.isActive(now)) {
         return ban;
       }
@@ -406,11 +406,11 @@ public final class PlayerDataStore {
     }
     long now = System.currentTimeMillis();
     int count = 0;
-    for (UUID id : snapshot) {
-      if (id.equals(excluding)) {
+    for (UUID playerId : snapshot) {
+      if (playerId.equals(excluding)) {
         continue;
       }
-      BanRecord ban = bans.get(id);
+      BanRecord ban = bans.get(playerId);
       if (ban != null && ban.isActive(now)) {
         count++;
       }
@@ -418,24 +418,23 @@ public final class PlayerDataStore {
     return count;
   }
 
-  public Profile profileOf(UUID id) {
-    return profiles.get(id);
+  public Profile profileOf(UUID playerId) {
+    return profiles.get(playerId);
   }
 
   public UUID findUuidByName(String name) {
     if (name == null) return null;
-    String lower = name.toLowerCase(Locale.ROOT);
     for (var entry : profiles.entrySet()) {
       Profile p = entry.getValue();
-      if (p.name != null && p.name.equalsIgnoreCase(lower)) {
+      if (p.name != null && p.name.equalsIgnoreCase(name)) {
         return entry.getKey();
       }
     }
     return null;
   }
 
-  public List<UUID> altsOf(UUID id) {
-    Profile profile = profiles.get(id);
+  public List<UUID> altsOf(UUID playerId) {
+    Profile profile = profiles.get(playerId);
     if (profile == null) {
       return Collections.emptyList();
     }
@@ -449,12 +448,12 @@ public final class PlayerDataStore {
         linked.addAll(bucket);
       }
     }
-    linked.remove(id);
+    linked.remove(playerId);
     return new ArrayList<>(linked);
   }
 
-  public String lastIpFor(UUID id) {
-    Profile profile = profiles.get(id);
+  public String lastIpFor(UUID playerId) {
+    Profile profile = profiles.get(playerId);
     if (profile == null) {
       return null;
     }
@@ -463,42 +462,42 @@ public final class PlayerDataStore {
     }
   }
 
-  public String lastNameFor(UUID id) {
-    Profile profile = profiles.get(id);
+  public String lastNameFor(UUID playerId) {
+    Profile profile = profiles.get(playerId);
     return profile == null ? null : profile.name;
   }
 
-  public void saveWipeSnapshot(UUID id, WipeSnapshot snapshot) {
-    if (id == null || snapshot == null) {
+  public void saveWipeSnapshot(UUID playerId, WipeSnapshot snapshot) {
+    if (playerId == null || snapshot == null) {
       return;
     }
-    wipeSnapshots.put(id, snapshot);
+    wipeSnapshots.put(playerId, snapshot);
     dirty = true;
   }
 
-  public WipeSnapshot wipeSnapshotFor(UUID id) {
-    return id == null ? null : wipeSnapshots.get(id);
+  public WipeSnapshot wipeSnapshotFor(UUID playerId) {
+    return playerId == null ? null : wipeSnapshots.get(playerId);
   }
 
-  public boolean hasWipeSnapshot(UUID id) {
-    return id != null && wipeSnapshots.containsKey(id);
+  public boolean hasWipeSnapshot(UUID playerId) {
+    return playerId != null && wipeSnapshots.containsKey(playerId);
   }
 
-  public void removeWipeSnapshot(UUID id) {
-    if (id != null && wipeSnapshots.remove(id) != null) {
+  public void removeWipeSnapshot(UUID playerId) {
+    if (playerId != null && wipeSnapshots.remove(playerId) != null) {
       dirty = true;
     }
   }
 
-  public void markWipeSnapshotPendingRestore(UUID id) {
-    if (id == null) {
+  public void markWipeSnapshotPendingRestore(UUID playerId) {
+    if (playerId == null) {
       return;
     }
-    WipeSnapshot snapshot = wipeSnapshots.get(id);
+    WipeSnapshot snapshot = wipeSnapshots.get(playerId);
     if (snapshot == null) {
       return;
     }
-    wipeSnapshots.put(id, new WipeSnapshot(
+    wipeSnapshots.put(playerId, new WipeSnapshot(
         snapshot.name, snapshot.inventory, snapshot.armor, snapshot.offhand,
         snapshot.enderChest, snapshot.variableEnderChest,
         snapshot.level, snapshot.exp, snapshot.totalExp,
@@ -519,7 +518,7 @@ public final class PlayerDataStore {
           continue;
         }
         try {
-          UUID id = UUID.fromString(key);
+          UUID playerId = UUID.fromString(key);
           String banId = entry.getString("banId", null);
           if (banId == null) {
             banId = "BAN-" + banCounter.incrementAndGet();
@@ -527,7 +526,7 @@ public final class PlayerDataStore {
           long bannedAt = entry.getLong("bannedAt", System.currentTimeMillis());
           BanRecord ban = new BanRecord(
               banId,
-              id,
+              playerId,
               entry.getString("name"),
               entry.getString("ip"),
               entry.getString("reason", ""),
@@ -535,7 +534,7 @@ public final class PlayerDataStore {
               bannedAt,
               entry.getLong("expiresAt", -1L),
               entry.getBoolean("evader", false));
-          bans.put(id, ban);
+          bans.put(playerId, ban);
           banIndex.put(banId, ban);
         } catch (IllegalArgumentException ignored) {
         }
@@ -569,9 +568,9 @@ public final class PlayerDataStore {
       for (String ip : ipSection.getKeys(false)) {
         List<String> ids = ipSection.getStringList(ip);
         Deque<UUID> bucket = ips.computeIfAbsent(ip, k -> new ArrayDeque<>());
-        for (String id : ids) {
+        for (String playerId : ids) {
           try {
-            bucket.addLast(UUID.fromString(id));
+            bucket.addLast(UUID.fromString(playerId));
           } catch (IllegalArgumentException ignored) {
           }
         }
@@ -585,8 +584,8 @@ public final class PlayerDataStore {
           continue;
         }
         try {
-          UUID id = UUID.fromString(key);
-          wipeSnapshots.put(id, readSnapshot(entry));
+          UUID playerId = UUID.fromString(key);
+          wipeSnapshots.put(playerId, readSnapshot(entry));
         } catch (IllegalArgumentException ignored) {
         }
       }
@@ -621,14 +620,36 @@ public final class PlayerDataStore {
 
   private List<org.bukkit.inventory.ItemStack> readItems(
       ConfigurationSection entry, String sectionName) {
-    List<org.bukkit.inventory.ItemStack> out = new ArrayList<>();
     ConfigurationSection section = entry.getConfigurationSection(sectionName);
     if (section == null) {
-      return out;
+      return new ArrayList<>();
     }
-    for (String slot : section.getKeys(false)) {
-      org.bukkit.inventory.ItemStack item = section.getItemStack(slot);
-      out.add(item);
+    Map<Integer, org.bukkit.inventory.ItemStack> bySlot = new LinkedHashMap<>();
+    int maxSlot = -1;
+    for (String slotKey : section.getKeys(false)) {
+      org.bukkit.inventory.ItemStack item = section.getItemStack(slotKey);
+      if (item == null) {
+        continue;
+      }
+      try {
+        int slot = Integer.parseInt(slotKey);
+        bySlot.put(slot, item);
+        maxSlot = Math.max(maxSlot, slot);
+      } catch (NumberFormatException ignored) {
+        bySlot.put(bySlot.size(), item);
+        maxSlot = Math.max(maxSlot, bySlot.size() - 1);
+      }
+    }
+    if (maxSlot < 0) {
+      return new ArrayList<>();
+    }
+    List<org.bukkit.inventory.ItemStack> out =
+        new ArrayList<>(java.util.Collections.nCopies(maxSlot + 1, null));
+    for (Map.Entry<Integer, org.bukkit.inventory.ItemStack> itemEntry : bySlot.entrySet()) {
+      int slot = itemEntry.getKey();
+      if (slot >= 0 && slot < out.size()) {
+        out.set(slot, itemEntry.getValue());
+      }
     }
     return out;
   }
@@ -636,12 +657,12 @@ public final class PlayerDataStore {
   private void writeItems(ConfigurationSection entry, String sectionName,
       List<org.bukkit.inventory.ItemStack> items) {
     ConfigurationSection section = entry.createSection(sectionName);
-    int i = 0;
+    int index = 0;
     for (org.bukkit.inventory.ItemStack item : items) {
       if (item != null && item.getType() != org.bukkit.Material.AIR) {
-        section.set(String.valueOf(i), item);
+        section.set(String.valueOf(index), item);
       }
-      i++;
+      index++;
     }
   }
 
@@ -683,8 +704,8 @@ public final class PlayerDataStore {
         List<String> list;
         synchronized (mapEntry.getValue()) {
           list = new ArrayList<>(mapEntry.getValue().size());
-          for (UUID id : mapEntry.getValue()) {
-            list.add(id.toString());
+          for (UUID playerId : mapEntry.getValue()) {
+            list.add(playerId.toString());
           }
         }
         ipsOut.put(mapEntry.getKey(), list);

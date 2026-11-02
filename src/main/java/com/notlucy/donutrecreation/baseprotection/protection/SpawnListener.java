@@ -42,15 +42,15 @@ public class SpawnListener implements Listener {
       SpawnReason.SLIME_SPLIT,
       SpawnReason.SILVERFISH_BLOCK);
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final boolean killNaturalSpawns;
   private final boolean killAllUnderFloorSpawns;
 
-  public SpawnListener(RevealManager rm) {
-    this.rm = rm;
-    this.killNaturalSpawns = rm.plugin().getConfig()
+  public SpawnListener(RevealManager revealManager) {
+    this.revealManager = revealManager;
+    this.killNaturalSpawns = revealManager.plugin().getConfig()
         .getBoolean("hider.block-natural-spawns-below-hide", true);
-    this.killAllUnderFloorSpawns = rm.plugin().getConfig()
+    this.killAllUnderFloorSpawns = revealManager.plugin().getConfig()
         .getBoolean("hider.block-all-spawns-below-hide", true);
     LogData.get().info("[hider] block natural spawns under floor: " + killNaturalSpawns
         + " (all reasons: " + killAllUnderFloorSpawns + ")");
@@ -60,7 +60,7 @@ public class SpawnListener implements Listener {
   public void onCreatureSpawn(CreatureSpawnEvent event) {
     SpawnReason reason = event.getSpawnReason();
     LivingEntity entity = event.getEntity();
-    if (entity.getLocation().getY() >= rm.hideBelowY()) {
+    if (entity.getLocation().getY() >= revealManager.hideBelowY()) {
       return;
     }
     boolean isNatural = reason != null && NATURAL_SPAWNS.contains(reason);
@@ -78,23 +78,23 @@ public class SpawnListener implements Listener {
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
-  public void onChunkUnload(ChunkUnloadEvent event) {
-    rm.onChunkUnload(event.getChunk());
+  public void handleChunkUnload(ChunkUnloadEvent event) {
+    revealManager.handleChunkUnload(event.getChunk());
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockBreak(BlockBreakEvent event) {
-    Block b = event.getBlock();
-    if (isAmethyst(b.getType())) {
-      rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
+    Block block = event.getBlock();
+    if (isAmethystBlock(block.getType())) {
+      revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockPlace(BlockPlaceEvent event) {
-    Block b = event.getBlockPlaced();
-    if (isAmethyst(b.getType())) {
-      rm.recordAmethystAt(b.getX(), b.getY(), b.getZ());
+    Block block = event.getBlockPlaced();
+    if (isAmethystBlock(block.getType())) {
+      revealManager.rememberAmethystBlock(block.getX(), block.getY(), block.getZ());
     }
   }
 
@@ -115,42 +115,42 @@ public class SpawnListener implements Listener {
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockExplode(BlockExplodeEvent event) {
-    for (Block b : event.blockList()) {
-      if (isAmethyst(b.getType())) {
-        rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
+    for (Block block : event.blockList()) {
+      if (isAmethystBlock(block.getType())) {
+        revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
       }
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onBlockPhysics(BlockPhysicsEvent event) {
-    Block b = event.getBlock();
-    if (isAmethyst(b.getType())) {
-      rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
+    Block block = event.getBlock();
+    if (isAmethystBlock(block.getType())) {
+      revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onEntityExplode(EntityExplodeEvent event) {
-    for (Block b : event.blockList()) {
-      if (isAmethyst(b.getType())) {
-        rm.forgetAmethystAt(b.getX(), b.getY(), b.getZ());
+    for (Block block : event.blockList()) {
+      if (isAmethystBlock(block.getType())) {
+        revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
       }
     }
 
   }
 
   private void syncOne(Block before, BlockState after) {
-    boolean wasAm = isAmethyst(before.getType());
-    boolean nowAm = isAmethyst(after.getType());
+    boolean wasAm = isAmethystBlock(before.getType());
+    boolean nowAm = isAmethystBlock(after.getType());
     if (wasAm && !nowAm) {
-      rm.forgetAmethystAt(before.getX(), before.getY(), before.getZ());
+      revealManager.forgetAmethystBlock(before.getX(), before.getY(), before.getZ());
     } else if (!wasAm && nowAm) {
-      rm.recordAmethystAt(before.getX(), before.getY(), before.getZ());
+      revealManager.rememberAmethystBlock(before.getX(), before.getY(), before.getZ());
     }
   }
 
-  private static boolean isAmethyst(Material m) {
+  private static boolean isAmethystBlock(Material m) {
     return m == Material.AMETHYST_BLOCK
         || m == Material.BUDDING_AMETHYST
         || m == Material.AMETHYST_CLUSTER

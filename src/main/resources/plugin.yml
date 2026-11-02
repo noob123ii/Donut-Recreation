@@ -1,7 +1,7 @@
 main: ${PACKAGE}.${NAME}
 name: ${NAME}
 version: "${VERSION}"
-api-version: "1.21"
+api-version: "26.3"
 author: Notlucy
 description: Donut-style anti-freecam and /sus recreation plugin
 softdepend: [LuckPerms]
@@ -37,9 +37,6 @@ permissions:
   donutrecreation.bypass:
     description: Bypasses anti-freecam checks
     default: op
-  donutrecreation.hider.bypass:
-    description: Bypasses the under-floor block hider (sees the real world below the floor)
-    default: op
   donutrecreation.staff.staffmode:
     description: Grants access to staff commands when staffmode is active (granted by /staffmode)
     default: false
@@ -49,5 +46,4 @@ permissions:
     children:
       donutrecreation.alerts: true
       donutrecreation.bypass: true
-      donutrecreation.hider.bypass: true
       donutrecreation.staff.staffmode: true

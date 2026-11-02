@@ -27,7 +27,7 @@ import com.notlucy.donutrecreation.baseprotection.packet.PacketHider;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class RevealListener implements Listener {
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final PacketHider hider;
   private int taskId = -1;
 
@@ -37,24 +37,24 @@ public final class RevealListener implements Listener {
   private final java.util.concurrent.ConcurrentMap<java.util.UUID, Long> lastVoidAttempt =
       new java.util.concurrent.ConcurrentHashMap<>();
 
-  public RevealListener(RevealManager rm, PacketHider hider) {
-    this.rm    = rm;
+  public RevealListener(RevealManager revealManager, PacketHider hider) {
+    this.revealManager    = revealManager;
     this.hider = hider;
-    var cfg = rm.plugin().getConfig();
+    var cfg = revealManager.plugin().getConfig();
     this.voidTriggerY  = cfg.getInt("hider.void-trigger-y", -64);
     this.voidCooldownMs = Math.max(0, cfg.getLong("hider.void-attempt-cooldown-ms", 1000));
   }
 
   public void start() {
-    this.period = Math.max(1, rm.plugin().getConfig().getInt("hider.recompute-period-ticks", 10));
+    this.period = Math.max(1, revealManager.plugin().getConfig().getInt("hider.recompute-period-ticks", 10));
     taskId = Bukkit.getScheduler()
-        .runTaskTimer(rm.plugin(), this::tick, 1L, (long) period)
+        .runTaskTimer(revealManager.plugin(), this::tick, 1L, (long) period)
         .getTaskId();
   }
 
   private void tick() {
-    for (Player p : Bukkit.getOnlinePlayers()) {
-      rm.recomputeForPlayer(p);
+    for (Player player : Bukkit.getOnlinePlayers()) {
+      revealManager.refreshRevealState(player);
     }
   }
 
@@ -67,62 +67,62 @@ public final class RevealListener implements Listener {
     Block block = event.getBlock();
     Player player = event.getPlayer();
     if (block.getType() == org.bukkit.Material.SPAWNER) {
-      if (rm.plugin().isStaffModeActive(player.getUniqueId())) {
+      if (revealManager.plugin().isStaffModeActive(player.getUniqueId())) {
         event.setCancelled(true);
-        player.sendMessage(rm.plugin().color("&cYou cannot break spawners while in staff mode."));
+        player.sendMessage(revealManager.plugin().color("&cYou cannot break spawners while in staff mode."));
         return;
       }
     }
-    int by    = block.getY();
-    int floor = rm.hideBelowY();
-    if (by <= floor) {
-      rm.revealAndSend(player, block.getX() >> 4, block.getZ() >> 4, rm.initialRadius());
-      Bukkit.getScheduler().runTask(rm.plugin(), () -> rm.recomputeForPlayer(player));
+    int blockY    = block.getY();
+    int floor = revealManager.hideBelowY();
+    if (blockY <= floor) {
+      revealManager.revealAround(player, block.getX() >> 4, block.getZ() >> 4, revealManager.initialRadius());
+      Bukkit.getScheduler().runTask(revealManager.plugin(), () -> revealManager.refreshRevealState(player));
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onPlayerInteract(PlayerInteractEvent event) {
     Block block = event.getClickedBlock();
-    if (block == null || block.getY() != rm.hideBelowY() - 1) return;
+    if (block == null || block.getY() != revealManager.hideBelowY() - 1) return;
     Player player = event.getPlayer();
-    if (player.getLocation().getBlockY() < rm.hideBelowY()) {
-      rm.revealAndSend(player, block.getX() >> 4, block.getZ() >> 4, rm.initialRadius());
+    if (player.getLocation().getBlockY() < revealManager.hideBelowY()) {
+      revealManager.revealAround(player, block.getX() >> 4, block.getZ() >> 4, revealManager.initialRadius());
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
   public void onPlayerMove(PlayerMoveEvent event) {
     var from = event.getFrom();
-    var to   = event.getTo();
-    if (to == null) return;
+    var destination   = event.getTo();
+    if (destination == null) return;
 
     Player player = event.getPlayer();
 
-    if (to.getY() < voidTriggerY && from.getY() >= to.getY()) { handleVoid(player); return; }
+    if (destination.getY() < voidTriggerY && from.getY() >= destination.getY()) { handleVoid(player); return; }
 
-    int fcx = from.getBlockX() >> 4, fcz = from.getBlockZ() >> 4;
-    int tcx = to.getBlockX()   >> 4, tcz = to.getBlockZ()   >> 4;
-    boolean crossedChunk = fcx != tcx || fcz != tcz;
-    boolean crossedFloor = (from.getY() < rm.hideBelowY()) != (to.getY() < rm.hideBelowY());
-    int upperY = rm.upperBarrierY();
-    boolean crossedUpper   = (from.getY() < upperY) != (to.getY() < upperY);
-    boolean approachingUpper = !crossedUpper && to.getY() >= upperY
-        && to.getY() <= upperY + 3 && to.getY() < from.getY();
-    boolean approachingFloor = !crossedFloor && to.getY() >= rm.hideBelowY()
-        && to.getY() <= rm.hideBelowY() + 3 && to.getY() < from.getY();
+    int fromChunkX = from.getBlockX() >> 4, fromChunkZ = from.getBlockZ() >> 4;
+    int toChunkX = destination.getBlockX()   >> 4, toChunkZ = destination.getBlockZ()   >> 4;
+    boolean crossedChunk = fromChunkX != toChunkX || fromChunkZ != toChunkZ;
+    boolean crossedFloor = (from.getY() < revealManager.hideBelowY()) != (destination.getY() < revealManager.hideBelowY());
+    int upperY = revealManager.upperBarrierY();
+    boolean crossedUpper   = (from.getY() < upperY) != (destination.getY() < upperY);
+    boolean approachingUpper = !crossedUpper && destination.getY() >= upperY
+        && destination.getY() <= upperY + 3 && destination.getY() < from.getY();
+    boolean approachingFloor = !crossedFloor && destination.getY() >= revealManager.hideBelowY()
+        && destination.getY() <= revealManager.hideBelowY() + 3 && destination.getY() < from.getY();
 
     if (!crossedChunk && !crossedFloor && !crossedUpper && !approachingUpper && !approachingFloor) {
-      rm.updateEntityVisibility(player);
+      revealManager.refreshEntityVisibility(player);
       return;
     }
     if (crossedFloor || crossedUpper || approachingUpper || approachingFloor) {
-      rm.invalidateRecompute(player.getUniqueId());
+      revealManager.invalidateRevealThrottle(player.getUniqueId());
       if (crossedFloor) {
-        rm.clearHiddenEntities(player);
+        revealManager.showHiddenEntities(player);
       }
     }
-    rm.recomputeForPlayer(player);
+    revealManager.refreshRevealState(player);
   }
 
   @SuppressWarnings("checkstyle:MagicNumber")
@@ -132,19 +132,19 @@ public final class RevealListener implements Listener {
     if (last != null && now - last < voidCooldownMs) return;
     lastVoidAttempt.put(player.getUniqueId(), now);
 
-    int py = player.getLocation().getBlockY();
-    rm.plugin().susFlagManager().flag(player, "Under Bedrock (y=" + py + ")", "underbedrock");
-    var flag = rm.plugin().susFlagManager().getFlag(player.getUniqueId());
+    int playerY = player.getLocation().getBlockY();
+    revealManager.plugin().susFlagManager().flag(player, "Under Bedrock (y=" + playerY + ")", "underbedrock");
+    var flag = revealManager.plugin().susFlagManager().getFlag(player.getUniqueId());
     int count = flag != null ? flag.count() : 1;
-    String msg = rm.plugin().color("&c[acsus] &f" + player.getName()
-        + " &7Under Bedrock (y=" + py + ") &c(" + count + " flags)");
+    String msg = revealManager.plugin().color("&c[acsus] &f" + player.getName()
+        + " &7Under Bedrock (y=" + playerY + ") &c(" + count + " flags)");
     Bukkit.getOnlinePlayers().stream()
-        .filter(p -> p.hasPermission("donutrecreation.*"))
+        .filter(staff -> staff.hasPermission("donutrecreation.*"))
         .forEach(op -> op.sendMessage(msg));
-    rm.plugin().getLogger().info("[acsus] flagged " + player.getName()
-        + ": Under Bedrock (y=" + py + ") (" + count + " flags)");
+    revealManager.plugin().getLogger().info("[acsus] flagged " + player.getName()
+        + ": Under Bedrock (y=" + playerY + ") (" + count + " flags)");
 
-    var cfg = rm.plugin().getConfig();
+    var cfg = revealManager.plugin().getConfig();
     String redirect = cfg.getString("hider.void-redirect-server", "");
     if (redirect != null && !redirect.isEmpty()) { sendRedirect(player, redirect); return; }
     String worldName = cfg.getString("hider.void-spawn-world", "world");
@@ -171,41 +171,41 @@ public final class RevealListener implements Listener {
       DataOutputStream dos = new DataOutputStream(baos);
       dos.writeUTF("Connect");
       dos.writeUTF(server);
-      player.sendPluginMessage(rm.plugin(), "BungeeCord", baos.toByteArray());
+      player.sendPluginMessage(revealManager.plugin(), "BungeeCord", baos.toByteArray());
     } catch (IOException e) {
       com.notlucy.donutrecreation.util.LogData.get().warning(
-          "[void] failed to send bungee redirect: " + e);
+          "[void] failed destination send bungee redirect: " + e);
     }
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPlayerJoin(PlayerJoinEvent event) {
     Player player = event.getPlayer();
-    rm.setPlayerWorld(player.getUniqueId(), player.getWorld());
+    revealManager.trackPlayerWorld(player.getUniqueId(), player.getWorld());
     Location loc  = player.getLocation();
-    int py  = loc.getBlockY();
-    int pcx = loc.getBlockX() >> 4;
-    int pcz = loc.getBlockZ() >> 4;
+    int playerY  = loc.getBlockY();
+    int playerChunkX = loc.getBlockX() >> 4;
+    int playerChunkZ = loc.getBlockZ() >> 4;
 
-    if (py < rm.hideBelowY()) {
-      Bukkit.getScheduler().runTaskLater(rm.plugin(), () -> {
+    if (playerY < revealManager.hideBelowY()) {
+      Bukkit.getScheduler().runTaskLater(revealManager.plugin(), () -> {
         if (!player.isOnline()) return;
-        rm.revealAndSend(player, pcx, pcz, rm.initialRadius());
-        rm.revealUpperBandForJoin(player, pcx, pcz);
+        revealManager.revealAround(player, playerChunkX, playerChunkZ, revealManager.initialRadius());
+        revealManager.revealBarrierBandOnJoin(player, playerChunkX, playerChunkZ);
       }, 1L);
     } else {
-      Bukkit.getScheduler().runTaskLater(rm.plugin(), () -> {
+      Bukkit.getScheduler().runTaskLater(revealManager.plugin(), () -> {
         if (!player.isOnline()) return;
-        rm.revealUpperBandForJoin(player, pcx, pcz);
+        revealManager.revealBarrierBandOnJoin(player, playerChunkX, playerChunkZ);
       }, 1L);
     }
 
-    int delay = py < rm.hideBelowY() ? 20 : 5;
-    Bukkit.getScheduler().runTaskLater(rm.plugin(), () -> {
+    int delay = playerY < revealManager.hideBelowY() ? 20 : 5;
+    Bukkit.getScheduler().runTaskLater(revealManager.plugin(), () -> {
       if (!player.isOnline()) return;
-      rm.invalidateRecompute(player.getUniqueId());
-      rm.invalidateFloodCache(player.getUniqueId());
-      rm.recomputeForPlayer(player);
+      revealManager.invalidateRevealThrottle(player.getUniqueId());
+      revealManager.invalidateCaveFloodCache(player.getUniqueId());
+      revealManager.refreshRevealState(player);
     }, delay);
   }
 
@@ -213,19 +213,23 @@ public final class RevealListener implements Listener {
   public void onPlayerTeleport(PlayerTeleportEvent event) {
     Player player = event.getPlayer();
     if (event.getTo() != null) {
-      rm.setPlayerWorld(player.getUniqueId(), event.getTo().getWorld());
+      revealManager.trackPlayerWorld(player.getUniqueId(), event.getTo().getWorld());
     }
-    rm.invalidateRecompute(player.getUniqueId());
-    rm.invalidateFloodCache(player.getUniqueId());
+    revealManager.invalidateRevealThrottle(player.getUniqueId());
+    revealManager.invalidateCaveFloodCache(player.getUniqueId());
 
     var from = event.getFrom();
-    var to   = event.getTo();
-    if (to != null && from.getWorld() != null && to.getWorld() != null
-        && !from.getWorld().getUID().equals(to.getWorld().getUID())) {
-      rm.clearDeliveredChunks(player.getUniqueId());
+    var destination   = event.getTo();
+    if (destination != null && from.getWorld() != null && destination.getWorld() != null
+        && !from.getWorld().getUID().equals(destination.getWorld().getUID())) {
+      revealManager.clearDeliveredChunkCache(player.getUniqueId());
+      revealManager.clearRevealedChunks(player.getUniqueId());
+      if (hider != null) {
+        hider.clearPlayer(player.getUniqueId());
+      }
     }
 
-    Bukkit.getScheduler().runTaskLater(rm.plugin(), () -> rm.recomputeForPlayer(player), 2L);
+    Bukkit.getScheduler().runTaskLater(revealManager.plugin(), () -> revealManager.refreshRevealState(player), 2L);
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
@@ -236,18 +240,18 @@ public final class RevealListener implements Listener {
   public void onPlayerRespawn(PlayerRespawnEvent event) {
     Player player = event.getPlayer();
     if (event.getRespawnLocation() != null) {
-      rm.setPlayerWorld(player.getUniqueId(), event.getRespawnLocation().getWorld());
+      revealManager.trackPlayerWorld(player.getUniqueId(), event.getRespawnLocation().getWorld());
     }
-    Bukkit.getScheduler().runTaskLater(rm.plugin(), () -> {
-      rm.invalidateFloodCache(player.getUniqueId());
-      rm.invalidateRecompute(player.getUniqueId());
-      rm.recomputeForPlayer(player);
+    Bukkit.getScheduler().runTaskLater(revealManager.plugin(), () -> {
+      revealManager.invalidateCaveFloodCache(player.getUniqueId());
+      revealManager.invalidateRevealThrottle(player.getUniqueId());
+      revealManager.refreshRevealState(player);
     }, 5L);
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onPlayerQuit(PlayerQuitEvent event) {
-    rm.removePlayer(event.getPlayer());
+    revealManager.removePlayer(event.getPlayer());
     lastVoidAttempt.remove(event.getPlayer().getUniqueId());
     if (hider != null) hider.clearPlayer(event.getPlayer().getUniqueId());
   }

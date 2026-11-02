@@ -9,47 +9,46 @@ import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection
 import com.notlucy.donutrecreation.util.LogData;
 
 public final class ChunkDataHandler {
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
-  private final BlockEntityDebugProtection tiles;
+  private final BlockEntityDebugProtection blockEntities;
 
-  public ChunkDataHandler(RevealManager rm, DeepslateProtection deepslate,
-      AmethystProtection amethyst, BlockEntityDebugProtection tiles) {
-    this.rm = rm;
+  public ChunkDataHandler(RevealManager revealManager, DeepslateProtection deepslate,
+      AmethystProtection amethyst, BlockEntityDebugProtection blockEntities) {
+    this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
-    this.tiles = tiles;
+    this.blockEntities = blockEntities;
   }
 
-  public boolean handle(PacketSendEvent event, Player player) {
+  public boolean handlePacket(PacketSendEvent event, Player player) {
     WrapperPlayServerChunkData wrapper = new WrapperPlayServerChunkData(event);
-    int cx = wrapper.getColumn().getX();
-    int cz = wrapper.getColumn().getZ();
+    int chunkX = wrapper.getColumn().getX();
+    int chunkZ = wrapper.getColumn().getZ();
     boolean touched = false;
     try {
-      if (rm.geodeHideEnabled()) {
+      if (revealManager.geodeHideEnabled()) {
         touched = amethyst.rewriteChunk(wrapper, player);
       }
     } catch (Throwable e) {
-      LogData.get().warning("[hider] amethyst rewrite crashed at " + cx + "," + cz + ": " + e);
+      LogData.get().warning("[hider] amethyst rewrite crashed at " + chunkX + "," + chunkZ + ": " + e);
     }
     try {
       touched |= deepslate.rewriteChunk(event, wrapper, player);
     } catch (Throwable e) {
-      LogData.get().warning("[hider] deepslate rewrite crashed at " + cx + "," + cz + ": " + e);
+      LogData.get().warning("[hider] deepslate rewrite crashed at " + chunkX + "," + chunkZ + ": " + e);
     }
     try {
-      // Always scrub tiles - this must not be gated behind other rewrites
-      // or block-entity debug/ESP can read the base contents.
-      touched |= tiles.scrubChunk(wrapper.getColumn(), player, cx, cz);
+      /* Scrub blockEntities even when other rewrites are skipped: they expose containers. */
+      touched |= blockEntities.scrubChunk(wrapper.getColumn(), player, chunkX, chunkZ);
     } catch (Throwable e) {
-      LogData.get().warning("[hider] tile scrub crashed at " + cx + "," + cz + ": " + e);
+      LogData.get().warning("[hider] tile scrub crashed at " + chunkX + "," + chunkZ + ": " + e);
     }
     if (touched) {
       event.markForReEncode(true);
     }
-    rm.markChunkDelivered(player.getUniqueId(), cx, cz);
+    revealManager.recordChunkDelivered(player.getUniqueId(), chunkX, chunkZ);
     return touched;
   }
 }

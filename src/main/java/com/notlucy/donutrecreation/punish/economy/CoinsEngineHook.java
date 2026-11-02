@@ -135,11 +135,11 @@ public final class CoinsEngineHook {
       }
     }
     for (Object currency : currencies()) {
-      String id = idOf(currency);
-      Double amount = lookup.get(id.toLowerCase(Locale.ROOT));
+      String playerId = idOf(currency);
+      Double amount = lookup.get(playerId.toLowerCase(Locale.ROOT));
       double value = amount != null ? amount : 0.0;
       setBalance(player, currency, value);
-      LogData.get().info("[eco] wipe reset " + player.getName() + ": " + id + " -> " + value);
+      LogData.get().info("[eco] wipe reset " + player.getName() + ": " + playerId + " -> " + value);
     }
     for (Map.Entry<String, Double> entry : lookup.entrySet()) {
       if (findCurrency(entry.getKey()) == null) {
@@ -149,19 +149,19 @@ public final class CoinsEngineHook {
     }
   }
 
-  private static Object findCurrency(String id) {
-    if (id == null) {
+  private static Object findCurrency(String playerId) {
+    if (playerId == null) {
       return null;
     }
     resolve();
     if (available && getCurrency != null) {
       try {
-        return getCurrency.invoke(null, id);
+        return getCurrency.invoke(null, playerId);
       } catch (Throwable ignored) {
       }
     }
     for (Object currency : currencies()) {
-      if (id.equals(idOf(currency))) {
+      if (playerId.equals(idOf(currency))) {
         return currency;
       }
     }
@@ -170,8 +170,8 @@ public final class CoinsEngineHook {
 
   private static String idOf(Object currency) {
     try {
-      Object id = currencyId.invoke(currency);
-      return id != null ? id.toString() : "";
+      Object playerId = currencyId.invoke(currency);
+      return playerId != null ? playerId.toString() : "";
     } catch (Throwable ignored) {
       return "";
     }

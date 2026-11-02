@@ -9,13 +9,13 @@ import org.bukkit.entity.Player;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class ParticleDamper {
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
 
-  public ParticleDamper(RevealManager rm) {
-    this.rm = rm;
+  public ParticleDamper(RevealManager revealManager) {
+    this.revealManager = revealManager;
   }
 
-  public boolean handle(PacketSendEvent event, Player viewer) {
+  public boolean handlePacket(PacketSendEvent event, Player viewer) {
     if (viewer == null) {
       return false;
     }
@@ -25,11 +25,11 @@ public final class ParticleDamper {
     } catch (Throwable ignored) {
       return false;
     }
-    Vector3d pos = wrapper.getPosition();
-    if (pos == null) {
+    Vector3d position = wrapper.getPosition();
+    if (position == null) {
       return false;
     }
-    if (rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ())) {
+    if (revealManager.isPositionHidden(viewer, position.getX(), position.getY(), position.getZ())) {
       event.setCancelled(true);
       return true;
     }

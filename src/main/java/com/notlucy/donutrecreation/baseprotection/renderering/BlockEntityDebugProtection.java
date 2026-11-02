@@ -42,12 +42,12 @@ public final class BlockEntityDebugProtection {
     return null;
   }
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final boolean maskEnabled;
 
-  public BlockEntityDebugProtection(RevealManager rm) {
-    this.rm = rm;
-    var cfg = rm.plugin().getConfig();
+  public BlockEntityDebugProtection(RevealManager revealManager) {
+    this.revealManager = revealManager;
+    var cfg = revealManager.plugin().getConfig();
     this.maskEnabled = cfg.getBoolean("hider.tile-entity-mask-enabled", true);
   }
 
@@ -74,7 +74,7 @@ public final class BlockEntityDebugProtection {
    * Any region the viewer may legitimately see (surface, revealed
    * underworld, revealed band) keeps all of its block entities.
    */
-  public boolean scrubChunk(Column column, Player player, int cx, int cz) {
+  public boolean scrubChunk(Column column, Player player, int chunkX, int chunkZ) {
     if (!maskEnabled) {
       return false;
     }
@@ -82,7 +82,8 @@ public final class BlockEntityDebugProtection {
     if (tiles == null || tiles.length == 0) {
       return false;
     }
-    int floorY = rm.hideBelowY();
+    int floorY = revealManager.hideBelowY();
+    int upperY = revealManager.upperBarrierY();
 
     List<TileEntity> keep = new ArrayList<>(tiles.length);
     for (TileEntity t : tiles) {
@@ -90,9 +91,13 @@ public final class BlockEntityDebugProtection {
         continue;
       }
       int y = t.getY();
+      if (y >= upperY) {
+        keep.add(t);
+        continue;
+      }
       boolean regionVisible = y < floorY
-          ? rm.isRevealed(player, cx, cz)
-          : rm.isUpperRevealed(player, cx, cz);
+          ? revealManager.isChunkRevealed(player, chunkX, chunkZ)
+          : revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
       if (!regionVisible) {
         continue;
       }
@@ -110,15 +115,11 @@ public final class BlockEntityDebugProtection {
 
   public void handleBlockEntityData(PacketSendEvent event, Player player) {
     WrapperPlayServerBlockEntityData wrapper = new WrapperPlayServerBlockEntityData(event);
-    var pos = wrapper.getPosition();
-    int by = pos.getY();
-    int cx = pos.getX() >> 4;
-    int cz = pos.getZ() >> 4;
+    var position = wrapper.getPosition();
+    int blockY = position.getY();
 
-    if (by < rm.hideBelowY()) {
-      if (!rm.isRevealed(player, cx, cz)) {
-        event.setCancelled(true);
-      }
+    if (!revealManager.isPositionVisible(player, position.getX(), blockY, position.getZ())) {
+      event.setCancelled(true);
     }
   }
 

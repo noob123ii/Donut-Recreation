@@ -52,54 +52,54 @@ public final class HideManager {
     this.botRespawner = botRespawner;
   }
 
-  public boolean toggleName(UUID id) {
-    boolean newState = !hideName.contains(id);
+  public boolean toggleName(UUID viewerId) {
+    boolean newState = !hideName.contains(viewerId);
     if (newState) {
-      hideName.add(id);
+      hideName.add(viewerId);
     } else {
-      hideName.remove(id);
+      hideName.remove(viewerId);
     }
     return newState;
   }
 
-  public void setHidingName(UUID id, boolean hidden) {
+  public void setHidingName(UUID viewerId, boolean hidden) {
     if (hidden) {
-      hideName.add(id);
+      hideName.add(viewerId);
     } else {
-      hideName.remove(id);
+      hideName.remove(viewerId);
     }
   }
 
-  public boolean toggleSkin(UUID id) {
-    boolean newState = !hideSkin.contains(id);
+  public boolean toggleSkin(UUID viewerId) {
+    boolean newState = !hideSkin.contains(viewerId);
     if (newState) {
-      hideSkin.add(id);
+      hideSkin.add(viewerId);
     } else {
-      hideSkin.remove(id);
+      hideSkin.remove(viewerId);
     }
     return newState;
   }
 
-  public void setHidingSkin(UUID id, boolean hidden) {
+  public void setHidingSkin(UUID viewerId, boolean hidden) {
     if (hidden) {
-      hideSkin.add(id);
+      hideSkin.add(viewerId);
     } else {
-      hideSkin.remove(id);
+      hideSkin.remove(viewerId);
     }
   }
 
-  public boolean isHidingName(UUID id) {
-    return hideName.contains(id);
+  public boolean isHidingName(UUID viewerId) {
+    return hideName.contains(viewerId);
   }
 
-  public boolean isHidingSkin(UUID id) {
-    return hideSkin.contains(id);
+  public boolean isHidingSkin(UUID viewerId) {
+    return hideSkin.contains(viewerId);
   }
 
-  public void clear(UUID id) {
-    hideName.remove(id);
-    hideSkin.remove(id);
-    displayNameCache.remove(id);
+  public void clear(UUID viewerId) {
+    hideName.remove(viewerId);
+    hideSkin.remove(viewerId);
+    displayNameCache.remove(viewerId);
   }
 
   public void registerExtraTarget(TestBot bot) {
@@ -111,16 +111,16 @@ public final class HideManager {
   }
 
   public void applyToViewer(Player viewer) {
-    boolean n = hideName.contains(viewer.getUniqueId());
-    boolean s = hideSkin.contains(viewer.getUniqueId());
-    if (!n && !s) {
+    boolean namesHidden = hideName.contains(viewer.getUniqueId());
+    boolean skinsHidden = hideSkin.contains(viewer.getUniqueId());
+    if (!namesHidden && !skinsHidden) {
       return;
     }
     for (Player target : Bukkit.getOnlinePlayers()) {
       if (target.equals(viewer)) {
         continue;
       }
-      applyIdentity(viewer, target, n, s);
+      applyIdentity(viewer, target, namesHidden, skinsHidden);
     }
     for (TestBot bot : extraTargets) {
       applyBotIdentity(viewer, bot, true);
@@ -132,10 +132,10 @@ public final class HideManager {
       if (viewer.equals(target)) {
         continue;
       }
-      boolean n = hideName.contains(viewer.getUniqueId());
-      boolean s = hideSkin.contains(viewer.getUniqueId());
-      if (n || s) {
-        applyIdentity(viewer, target, n, s);
+      boolean namesHidden = hideName.contains(viewer.getUniqueId());
+      boolean skinsHidden = hideSkin.contains(viewer.getUniqueId());
+      if (namesHidden || skinsHidden) {
+        applyIdentity(viewer, target, namesHidden, skinsHidden);
       }
     }
     for (TestBot bot : extraTargets) {
@@ -149,12 +149,12 @@ public final class HideManager {
   }
 
   public void restoreAllNames(Player viewer) {
-    boolean s = hideSkin.contains(viewer.getUniqueId());
+    boolean skinsHidden = hideSkin.contains(viewer.getUniqueId());
     for (Player target : Bukkit.getOnlinePlayers()) {
       if (target.equals(viewer)) {
         continue;
       }
-      applyIdentity(viewer, target, false, s);
+      applyIdentity(viewer, target, false, skinsHidden);
     }
     for (TestBot bot : extraTargets) {
       applyBotIdentity(viewer, bot, false);
@@ -162,12 +162,12 @@ public final class HideManager {
   }
 
   public void restoreAllSkins(Player viewer) {
-    boolean n = hideName.contains(viewer.getUniqueId());
+    boolean namesHidden = hideName.contains(viewer.getUniqueId());
     for (Player target : Bukkit.getOnlinePlayers()) {
       if (target.equals(viewer)) {
         continue;
       }
-      applyIdentity(viewer, target, n, false);
+      applyIdentity(viewer, target, namesHidden, false);
     }
     for (TestBot bot : extraTargets) {
       applyBotIdentity(viewer, bot, false);
@@ -273,18 +273,18 @@ public final class HideManager {
     try {
       send(viewer, new WrapperPlayServerDestroyEntities(target.getEntityId()));
       Location loc = target.getLocation();
-      com.github.retrooper.packetevents.protocol.world.Location pl =
+      com.github.retrooper.packetevents.protocol.world.Location packetLocation =
           new com.github.retrooper.packetevents.protocol.world.Location(
               loc.getX(), loc.getY(), loc.getZ(), loc.getYaw(), loc.getPitch());
       send(viewer, new WrapperPlayServerSpawnEntity(
-          target.getEntityId(), target.getUniqueId(), EntityTypes.PLAYER, pl,
+          target.getEntityId(), target.getUniqueId(), EntityTypes.PLAYER, packetLocation,
           loc.getYaw(), 0, new Vector3d(0, 0, 0)));
       send(viewer, equipmentPacket(target));
     } catch (Throwable ignored) {
     }
   }
 
-  /** Re-sends the target's held items and armor, which a respawn wipes on the client. */
+  /** Re-sends the target'skinsHidden held items and armor, which a respawn wipes on the client. */
   private static WrapperPlayServerEntityEquipment equipmentPacket(Player target) {
     org.bukkit.inventory.PlayerInventory inv = target.getInventory();
     List<Equipment> equipment = List.of(

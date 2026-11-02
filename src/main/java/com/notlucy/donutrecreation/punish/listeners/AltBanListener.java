@@ -107,7 +107,8 @@ public final class AltBanListener implements Listener {
   private boolean isEvading(AsyncPlayerPreLoginEvent event, String ip) {
     PlayerDataStore.Profile profile = store.profileOf(event.getUniqueId());
     if (profile == null) {
-      return false;
+      /* A UUID never recorded here is a fresh account. */
+      return true;
     }
     long minAge = Math.max(0L,
         plugin.getConfig().getLong("alt-ban-account-min-age-hours", 168L));
@@ -122,10 +123,10 @@ public final class AltBanListener implements Listener {
     return !known;
   }
 
-  private void flag(UUID uuid, String name, PlayerDataStore.BanRecord other, int altCount, int threshold) {
+  private void flag(UUID playerId, String name, PlayerDataStore.BanRecord other, int altCount, int threshold) {
     try {
       String linked = other.name == null ? other.uuid.toString() : other.name;
-      plugin.susFlagManager().flag(uuid, name,
+      plugin.susFlagManager().flag(playerId, name,
           "Shares IP with banned " + linked + " (" + other.reason + ") — alt " + altCount + "/" + threshold);
       Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getOnlinePlayers().stream()
           .filter(p -> p.hasPermission("donutrecreation.*"))

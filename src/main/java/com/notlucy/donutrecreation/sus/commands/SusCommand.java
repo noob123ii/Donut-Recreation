@@ -148,7 +148,7 @@ public class SusCommand implements CommandExecutor, Listener {
         .replace("%reason%", reason);
     Bukkit.getOnlinePlayers().stream()
         .filter(p -> p.hasPermission("donutrecreation.*"))
-        .forEach(op -> op.sendMessage(alert));
+        .forEach(staffMember -> staffMember.sendMessage(alert));
     return true;
   }
 
@@ -162,9 +162,9 @@ public class SusCommand implements CommandExecutor, Listener {
     Inventory inv = Bukkit.createInventory(
         null, GUI_SIZE, listTitle(total, current, pages));
     int start = current * HEADS_PER_PAGE;
-    int end = Math.min(start + HEADS_PER_PAGE, total);
-    for (int i = start; i < end; i++) {
-      inv.setItem(i - start, headItem(flags.get(i)));
+    int pageEnd = Math.min(start + HEADS_PER_PAGE, total);
+    for (int pageSlot = start; pageSlot < pageEnd; pageSlot++) {
+      inv.setItem(pageSlot - start, headItem(flags.get(pageSlot)));
     }
     if (current > 0) {
       inv.setItem(PREV_SLOT, navItem(
@@ -191,28 +191,28 @@ public class SusCommand implements CommandExecutor, Listener {
     if (item == null || !item.hasItemMeta()) return;
 
     ItemMeta meta = item.getItemMeta();
-    var pdc = meta.getPersistentDataContainer();
+    var persistentData = meta.getPersistentDataContainer();
 
-    if (pdc.has(refreshKey, PersistentDataType.BYTE)) {
+    if (persistentData.has(refreshKey, PersistentDataType.BYTE)) {
       releaseSpectate(viewer.getUniqueId());
       openPlayerList(viewer, viewPage.getOrDefault(viewer.getUniqueId(), 0));
       playAlert(viewer);
       return;
     }
 
-    if (pdc.has(prevKey, PersistentDataType.BYTE)) {
+    if (persistentData.has(prevKey, PersistentDataType.BYTE)) {
       int page = viewPage.getOrDefault(viewer.getUniqueId(), 0);
       openPlayerList(viewer, Math.max(0, page - 1));
       return;
     }
 
-    if (pdc.has(nextKey, PersistentDataType.BYTE)) {
+    if (persistentData.has(nextKey, PersistentDataType.BYTE)) {
       int page = viewPage.getOrDefault(viewer.getUniqueId(), 0);
       openPlayerList(viewer, page + 1);
       return;
     }
 
-    String targetUuid = pdc.get(targetKey, PersistentDataType.STRING);
+    String targetUuid = persistentData.get(targetKey, PersistentDataType.STRING);
     if (targetUuid == null) return;
 
     Player target;

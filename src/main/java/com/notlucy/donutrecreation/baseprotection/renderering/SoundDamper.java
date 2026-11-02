@@ -18,16 +18,16 @@ public final class SoundDamper {
 
   private static final double SELF_SOUND_RADIUS_SQ = 8.0 * 8.0;
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final Map<World, Map<Integer, Entity>> entityIndex = new HashMap<>();
   private final Object indexLock = new Object();
   private long indexTick = Long.MIN_VALUE;
 
-  public SoundDamper(RevealManager rm) {
-    this.rm = rm;
+  public SoundDamper(RevealManager revealManager) {
+    this.revealManager = revealManager;
   }
 
-  public boolean handle(PacketSendEvent event, Player viewer) {
+  public boolean handlePacket(PacketSendEvent event, Player viewer) {
     if (viewer == null) {
       return false;
     }
@@ -52,25 +52,25 @@ public final class SoundDamper {
 
   private boolean handlePositional(PacketSendEvent event, Player viewer) {
     WrapperPlayServerSoundEffect wrapper = new WrapperPlayServerSoundEffect(event);
-    var pos = wrapper.getPosition();
-    if (pos == null) {
+    var position = wrapper.getPosition();
+    if (position == null) {
       return false;
     }
     var vloc = viewer.getLocation();
-    double dx = pos.getX() - vloc.getX();
-    double dy = pos.getY() - vloc.getY();
-    double dz = pos.getZ() - vloc.getZ();
+    double dx = position.getX() - vloc.getX();
+    double dy = position.getY() - vloc.getY();
+    double dz = position.getZ() - vloc.getZ();
     if (dx * dx + dy * dy + dz * dz <= SELF_SOUND_RADIUS_SQ) {
       return false;
     }
-    boolean unrevealed = rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ());
+    boolean unrevealed = revealManager.isPositionHidden(viewer, position.getX(), position.getY(), position.getZ());
     if (unrevealed) {
       event.setCancelled(true);
       return true;
     }
-    int cx = ((int) Math.floor(pos.getX())) >> 4;
-    int cz = ((int) Math.floor(pos.getZ())) >> 4;
-    if (!rm.isRevealed(viewer, cx, cz) && isLogicalSound(wrapper.getSound())) {
+    int blockY = (int) Math.floor(position.getY());
+    if (!revealManager.isPositionVisible(viewer, (int) Math.floor(position.getX()), blockY, (int) Math.floor(position.getZ()))
+        && isLogicalSound(wrapper.getSound())) {
       event.setCancelled(true);
       return true;
     }
@@ -111,7 +111,7 @@ public final class SoundDamper {
     if (dx * dx + dy * dy + dz * dz <= SELF_SOUND_RADIUS_SQ) {
       return false;
     }
-    if (rm.shouldSuppressEntityFor(viewer, loc.getX(), loc.getY(), loc.getZ())) {
+    if (revealManager.isPositionHidden(viewer, loc.getX(), loc.getY(), loc.getZ())) {
       event.setCancelled(true);
       return true;
     }

@@ -87,8 +87,8 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
           + String.join("|", SUBCOMMANDS) + ">"));
       return true;
     }
-    String sub = args[0].toLowerCase(Locale.ROOT);
-    switch (sub) {
+    String subcommand = args[0].toLowerCase(Locale.ROOT);
+    switch (subcommand) {
       case "stash" -> {
         String name = args.length > 1 ? args[1] : null;
         spawnFakeStash(player, name);
@@ -118,9 +118,9 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
     if (args.length == 1) {
       String prefix = args[0].toLowerCase(Locale.ROOT);
       List<String> out = new ArrayList<>();
-      for (String s : SUBCOMMANDS) {
-        if (s.startsWith(prefix)) {
-          out.add(s);
+      for (String subcommandName : SUBCOMMANDS) {
+        if (subcommandName.startsWith(prefix)) {
+          out.add(subcommandName);
         }
       }
       return out;
@@ -162,31 +162,31 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
     Location origin = player.getLocation().getBlock().getLocation();
     List<GhostBlockManager.GhostBlock> ghostList =
         template.toGhostBlocks(origin, player.getLocation().getYaw());
-    long id = ghosts.broadcast(ghostList, FIVE_MIN_TICKS, STASH_BROADCAST_RADIUS,
+    long groupId = ghosts.broadcast(ghostList, FIVE_MIN_TICKS, STASH_BROADCAST_RADIUS,
         () -> fakeEntities.despawnAllFor(player));
     int viewerCount = 0;
-    for (var p : Bukkit.getOnlinePlayers()) {
-      if (!p.getWorld().equals(origin.getWorld())) continue;
-      if (p.getLocation().distanceSquared(origin) <= (double) STASH_BROADCAST_RADIUS * STASH_BROADCAST_RADIUS) {
+    for (var onlinePlayer : Bukkit.getOnlinePlayers()) {
+      if (!onlinePlayer.getWorld().equals(origin.getWorld())) continue;
+      if (onlinePlayer.getLocation().distanceSquared(origin) <= (double) STASH_BROADCAST_RADIUS * STASH_BROADCAST_RADIUS) {
         viewerCount++;
       }
     }
     player.sendMessage(plugin.color(
         "&aFake stash '&f" + template.name + "&a' spawned (&f"
-            + ghostList.size() + "&a blocks, group #" + id
+            + ghostList.size() + "&a blocks, group #" + groupId
             + "&a, visible to &f" + viewerCount + " &aplayers, reverts in 5min)."));
   }
 
   private void spawnFakeSpawner(Player player) {
-    Location loc = player.getLocation().getBlock().getLocation();
+    Location location = player.getLocation().getBlock().getLocation();
     BlockData spawner = Material.SPAWNER.createBlockData();
-    long id = ghosts.send(player,
-        List.of(new GhostBlockManager.GhostBlock(loc, spawner)),
+    long groupId = ghosts.send(player,
+        List.of(new GhostBlockManager.GhostBlock(location, spawner)),
         FIVE_MIN_TICKS,
         null);
     player.sendMessage(plugin.color(
-        "&aFake skeleton spawner placed at &f" + format(loc) + "&a (group #"
-            + id + "&a, reverts in 5min)."));
+        "&aFake skeleton spawner placed at &f" + format(location) + "&a (group #"
+            + groupId + "&a, reverts in 5min)."));
   }
 
   private void spawnFakePlayer(Player player) {
@@ -211,79 +211,79 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
     Hole hole = findDeepslatePair(player.getLocation(), 32);
     if (hole == null) {
       player.sendMessage(plugin.color(
-          "&cNo 2x1 deepslate found at y=-63 within 32 blocks."));
+          "&cNo 2x1 deepslate found at centerY=-63 within 32 blocks."));
       return;
     }
     World world = hole.center.getWorld();
-    int y = hole.center.getBlockY();
+    int centerY = hole.center.getBlockY();
 
     Location playerLoc = player.getLocation().getBlock().getLocation();
-    Location spawnerLoc;
-    Location npcLoc;
+    Location spawnerLocation;
+    Location npcLocation;
     Location budLoc;
     if (hole.alongZ) {
-      spawnerLoc = new Location(world, playerLoc.getX(), y, playerLoc.getZ() - 1);
-      npcLoc = new Location(world, playerLoc.getX() + 0.5, y, playerLoc.getZ() + 0.5);
-      budLoc = new Location(world, playerLoc.getX(), y, playerLoc.getZ() + 1);
-      npcLoc.setYaw(180f);
+      spawnerLocation = new Location(world, playerLoc.getX(), centerY, playerLoc.getZ() - 1);
+      npcLocation = new Location(world, playerLoc.getX() + 0.5, centerY, playerLoc.getZ() + 0.5);
+      budLoc = new Location(world, playerLoc.getX(), centerY, playerLoc.getZ() + 1);
+      npcLocation.setYaw(180f);
     } else {
-      spawnerLoc = new Location(world, playerLoc.getX() - 1, y, playerLoc.getZ());
-      npcLoc = new Location(world, playerLoc.getX() + 0.5, y, playerLoc.getZ() + 0.5);
-      budLoc = new Location(world, playerLoc.getX() + 1, y, playerLoc.getZ());
-      npcLoc.setYaw(90f);
+      spawnerLocation = new Location(world, playerLoc.getX() - 1, centerY, playerLoc.getZ());
+      npcLocation = new Location(world, playerLoc.getX() + 0.5, centerY, playerLoc.getZ() + 0.5);
+      budLoc = new Location(world, playerLoc.getX() + 1, centerY, playerLoc.getZ());
+      npcLocation.setYaw(90f);
     }
-    npcLoc.setPitch(0f);
+    npcLocation.setPitch(0f);
 
     BlockData spawner = Material.SPAWNER.createBlockData();
-    BlockData bud = Material.SMALL_AMETHYST_BUD.createBlockData();
-    if (bud instanceof AmethystCluster) {
-      ((AmethystCluster) bud).setFacing(hole.budFacing);
+    BlockData budBlock = Material.SMALL_AMETHYST_BUD.createBlockData();
+    if (budBlock instanceof AmethystCluster) {
+      ((AmethystCluster) budBlock).setFacing(hole.budFacing);
     }
     BlockData obsidian = Material.OBSIDIAN.createBlockData();
-    BlockData air = Material.AIR.createBlockData();
+    BlockData airBlock = Material.AIR.createBlockData();
 
-    int npcX = npcLoc.getBlockX();
-    int npcY = npcLoc.getBlockY();
-    int npcZ = npcLoc.getBlockZ();
+    int npcX = npcLocation.getBlockX();
+    int npcY = npcLocation.getBlockY();
+    int npcZ = npcLocation.getBlockZ();
 
     List<GhostBlockManager.GhostBlock> blocks = new ArrayList<>();
-    blocks.add(new GhostBlockManager.GhostBlock(spawnerLoc, spawner));
-    blocks.add(new GhostBlockManager.GhostBlock(budLoc, bud));
-    for (int dx = -1; dx <= 1; dx++) {
-      for (int dz = -1; dz <= 1; dz++) {
-        if (dx == 0 && dz == 0) {
+    blocks.add(new GhostBlockManager.GhostBlock(spawnerLocation, spawner));
+    blocks.add(new GhostBlockManager.GhostBlock(budLoc, budBlock));
+    for (int offsetX = -1; offsetX <= 1; offsetX++) {
+      for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
+        if (offsetX == 0 && offsetZ == 0) {
           continue;
         }
-        Location obsLoc = new Location(world, npcX + dx, npcY, npcZ + dz);
+        Location obsLoc = new Location(world, npcX + offsetX, npcY, npcZ + offsetZ);
         if (world.getBlockAt(obsLoc).getType() != Material.BEDROCK) {
           blocks.add(new GhostBlockManager.GhostBlock(obsLoc, obsidian));
         }
       }
     }
 
-    int npcFeetY = npcLoc.getBlockY();
+    int npcFeetY = npcLocation.getBlockY();
     int npcHeadY = npcFeetY + 1;
     blocks.add(new GhostBlockManager.GhostBlock(
-        new Location(world, npcLoc.getX(), npcFeetY, npcLoc.getZ()), air));
+        new Location(world, npcLocation.getX(), npcFeetY, npcLocation.getZ()), airBlock));
     blocks.add(new GhostBlockManager.GhostBlock(
-        new Location(world, npcLoc.getX(), npcHeadY, npcLoc.getZ()), air));
+        new Location(world, npcLocation.getX(), npcHeadY, npcLocation.getZ()), airBlock));
 
     String fakeName = REALISTIC_NAMES[
         ThreadLocalRandom.current().nextInt(REALISTIC_NAMES.length)];
-    npcs.spawn(npcLoc, fakeName, ONE_HOUR_TICKS, true);
+    npcs.spawn(npcLocation, fakeName, ONE_HOUR_TICKS, true);
 
     if (revealManager != null) {
-      revealManager.forceRevealGeodeChunk(player, npcLoc.getBlockX() >> 4, npcLoc.getBlockZ() >> 4);
+      revealManager.forceGeodeVisible(player, npcLocation.getBlockX() >> 4, npcLocation.getBlockZ() >> 4);
     }
 
     long blockGroupId = ghosts.broadcast(blocks, FIVE_MIN_TICKS, STASH_BROADCAST_RADIUS, null);
     ghosts.setRevertOnInteract(blockGroupId, true);
 
     player.sendMessage(plugin.color(
-        "&aFake bedrock spawner set up at &f" + format(npcLoc)
+        "&aFake bedrock spawner set up at &f" + format(npcLocation)
             + " &a(group #" + blockGroupId
-            + ", spawner @ " + format(spawnerLoc)
-            + ", bud @ " + format(budLoc)
+            + ", spawner @ " + format(spawnerLocation)
+            + ", budBlock @ " + format(budLoc)
             + ", NPC " + fakeName + " crawling)."));
   }
 
@@ -301,16 +301,16 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
 
   private Hole findDeepslatePair(Location origin, int radius) {
     World world = origin.getWorld();
-    int ox = origin.getBlockX();
-    int oz = origin.getBlockZ();
+    int originX = origin.getBlockX();
+    int originZ = origin.getBlockZ();
     int targetY = -63;
     int best = Integer.MAX_VALUE;
     Hole bestHole = null;
-    for (int dx = -radius; dx <= radius; dx++) {
-      for (int dz = -radius; dz <= radius; dz++) {
-        int x = ox + dx;
-        int z = oz + dz;
-        int distSq = dx * dx + dz * dz;
+    for (int offsetX = -radius; offsetX <= radius; offsetX++) {
+      for (int offsetZ = -radius; offsetZ <= radius; offsetZ++) {
+        int x = originX + offsetX;
+        int z = originZ + offsetZ;
+        int distSq = offsetX * offsetX + offsetZ * offsetZ;
         if (distSq >= best) {
           continue;
         }
@@ -327,35 +327,35 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
     return bestHole;
   }
 
-  private boolean isDeepslatePairZ(World world, int x, int y, int z) {
+  private boolean isDeepslatePairZ(World world, int x, int centerY, int z) {
     if (!world.isChunkLoaded(x >> 4, z >> 4)
         || !world.isChunkLoaded(x >> 4, (z + 1) >> 4)) {
       return false;
     }
-    return world.getBlockAt(x, y, z).getType() == Material.DEEPSLATE
-        && world.getBlockAt(x, y, z + 1).getType() == Material.DEEPSLATE;
+    return world.getBlockAt(x, centerY, z).getType() == Material.DEEPSLATE
+        && world.getBlockAt(x, centerY, z + 1).getType() == Material.DEEPSLATE;
   }
 
-  private boolean isDeepslatePairX(World world, int x, int y, int z) {
+  private boolean isDeepslatePairX(World world, int x, int centerY, int z) {
     if (!world.isChunkLoaded(x >> 4, z >> 4)
         || !world.isChunkLoaded((x + 1) >> 4, z >> 4)) {
       return false;
     }
-    return world.getBlockAt(x, y, z).getType() == Material.DEEPSLATE
-        && world.getBlockAt(x + 1, y, z).getType() == Material.DEEPSLATE;
+    return world.getBlockAt(x, centerY, z).getType() == Material.DEEPSLATE
+        && world.getBlockAt(x + 1, centerY, z).getType() == Material.DEEPSLATE;
   }
 
   private Location playerFacingLocation(Player player, double distance) {
-    Location eye = player.getEyeLocation();
-    var direction = eye.getDirection().setY(0).normalize();
-    Location target = eye.clone().add(direction.multiply(distance));
+    Location eyeLocation = player.getEyeLocation();
+    var direction = eyeLocation.getDirection().setY(0).normalize();
+    Location target = eyeLocation.clone().add(direction.multiply(distance));
     target.setY(player.getLocation().getY());
     target.setYaw(player.getLocation().getYaw() + 180f);
     target.setPitch(0f);
     return target;
   }
 
-  private String format(Location loc) {
-    return loc.getBlockX() + "," + loc.getBlockY() + "," + loc.getBlockZ();
+  private String format(Location location) {
+    return location.getBlockX() + "," + location.getBlockY() + "," + location.getBlockZ();
   }
 }

@@ -26,11 +26,12 @@ if (hasProperty('ver')) {
     }
 }
 
-version = shortVersion
+version = shortVersion ?: '1.0.7'
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
 }
 
 repositories {
@@ -62,14 +63,14 @@ repositories {
 }
 
 dependencies {
-    compileOnly 'io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT'
+    compileOnly 'io.papermc.paper:paper-api:26.3.build.237-stable'
     compileOnly 'com.github.spotbugs:spotbugs-annotations:4.9.8'
-    compileOnly 'net.luckperms:api:5.4'
+    implementation 'net.luckperms:api:5.4'
     implementation 'io.papermc:paperlib:1.0.8'
-    implementation 'com.github.retrooper:packetevents-spigot:2.12.2'
+    implementation 'com.github.retrooper:packetevents-spigot:2.14.0'
     spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0'
     testCompileOnly 'com.github.spotbugs:spotbugs-annotations:4.9.8'
-    testImplementation 'io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT'
+    testImplementation 'io.papermc.paper:paper-api:26.3.build.237-stable'
     testImplementation 'org.junit.jupiter:junit-jupiter:6.0.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.0.3'
 }
@@ -79,6 +80,7 @@ test {
 }
 
 processResources {
+    inputs.property("version", version)
     filesMatching("**/plugin.yml") {
         expand ( NAME: rootProject.name, VERSION: version, PACKAGE: rootProject.group.toString() )
     }
@@ -114,6 +116,7 @@ tasks.withType(SpotBugsTask).configureEach {
 }
 
 shadowJar {
+    archiveFileName.set(rootProject.name + '.jar')
     archiveClassifier.set('')
     relocate 'io.papermc.lib', 'shadow.io.papermc.paperlib'
     relocate 'com.github.retrooper.packetevents', 'shadow.com.github.retrooper.packetevents'

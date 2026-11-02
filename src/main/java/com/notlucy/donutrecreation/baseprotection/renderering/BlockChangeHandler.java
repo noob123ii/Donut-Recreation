@@ -9,37 +9,33 @@ import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
 import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection;
 
 public final class BlockChangeHandler {
-  private final RevealManager rm;
+  private final RevealManager revealManager;
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
 
-  public BlockChangeHandler(RevealManager rm, DeepslateProtection deepslate, AmethystProtection amethyst) {
-    this.rm = rm;
+  public BlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate, AmethystProtection amethyst) {
+    this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
   }
 
-  public boolean handle(PacketSendEvent event, Player player) {
+  public boolean handlePacket(PacketSendEvent event, Player player) {
     WrapperPlayServerBlockChange wrapper = new WrapperPlayServerBlockChange(event);
-    var pos = wrapper.getBlockPosition();
-    if (pos == null) {
+    var position = wrapper.getBlockPosition();
+    if (position == null) {
       return false;
     }
-    int x = pos.getX(), y = pos.getY(), z = pos.getZ();
+    int x = position.getX(), y = position.getY(), z = position.getZ();
 
-    if (y < rm.hideBelowY() && !rm.isRevealed(player, x >> 4, z >> 4)) {
-      event.setCancelled(true);
-      return true;
-    }
     if (deepslate.rewriteBlockChange(wrapper, player, x, y, z)
         || amethyst.rewriteBlockChange(wrapper, player, x, y, z)) {
       event.markForReEncode(true);
       return true;
     }
-    if (y > rm.spawnerMaskAboveY()) {
+    if (y > revealManager.spawnerMaskAboveY() && !deepslate.isNearSpawner(player, x, y, z)) {
       var state = wrapper.getBlockState();
       if (state != null && deepslate.isSpawner(state.getGlobalId())) {
-        wrapper.setBlockState(WrappedBlockState.getByGlobalId(deepslate.floorId()));
+        wrapper.setBlockState(WrappedBlockState.getByGlobalId(deepslate.stoneId()));
         event.markForReEncode(true);
         return true;
       }

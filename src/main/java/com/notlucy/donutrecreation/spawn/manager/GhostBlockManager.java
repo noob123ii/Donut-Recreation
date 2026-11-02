@@ -60,10 +60,10 @@ public final class GhostBlockManager {
     plugin.getServer().getPluginManager().registerEvents(new Listener() {
       @EventHandler
       public void onChunkLoad(ChunkLoadEvent event) {
-        int cx = event.getChunk().getX();
-        int cz = event.getChunk().getZ();
+        int chunkX = event.getChunk().getX();
+        int chunkZ = event.getChunk().getZ();
         for (Player viewer : Bukkit.getOnlinePlayers()) {
-          resendForChunk(viewer.getUniqueId(), viewer, cx, cz);
+          resendForChunk(viewer.getUniqueId(), viewer, chunkX, chunkZ);
         }
       }
     }, plugin);
@@ -87,8 +87,8 @@ public final class GhostBlockManager {
     if (ghosts == null || ghosts.isEmpty()) return -1L;
     GhostBlock origin = ghosts.get(0);
     World world = origin.location.getWorld();
-    int ox = origin.location.getBlockX();
-    int oz = origin.location.getBlockZ();
+    int originX = origin.location.getBlockX();
+    int originZ = origin.location.getBlockZ();
     double radiusSq = (double) radius * (double) radius;
     long firstId = -1L;
     for (Player viewer : Bukkit.getOnlinePlayers()) {
@@ -97,14 +97,14 @@ public final class GhostBlockManager {
         continue;
       }
       if (radius > 0) {
-        double dx = vloc.getBlockX() - ox;
-        double dz = vloc.getBlockZ() - oz;
-        if (dx * dx + dz * dz > radiusSq) {
+        double deltaX = vloc.getBlockX() - originX;
+        double deltaZ = vloc.getBlockZ() - originZ;
+        if (deltaX * deltaX + deltaZ * deltaZ > radiusSq) {
           continue;
         }
       }
-      long id = send(viewer, ghosts, ttlTicks, onRevert);
-      if (firstId == -1L) firstId = id;
+      long groupId = send(viewer, ghosts, ttlTicks, onRevert);
+      if (firstId == -1L) firstId = groupId;
     }
     return firstId;
   }
@@ -121,13 +121,13 @@ public final class GhostBlockManager {
     for (GhostBlock ghost : ghosts) {
       try {
         Location loc = ghost.location;
-        int cx = loc.getBlockX() >> 4;
-        int cz = loc.getBlockZ() >> 4;
-        long key = chunkKey(cx, cz);
+        int chunkX = loc.getBlockX() >> 4;
+        int chunkZ = loc.getBlockZ() >> 4;
+        long key = chunkKey(chunkX, chunkZ);
         sentLocations.add(ghost.location);
         playerChunks.computeIfAbsent(key, k -> new java.util.concurrent.CopyOnWriteArrayList<>())
             .add(ghost);
-        if (loc.getWorld() != null && loc.getWorld().isChunkLoaded(cx, cz)) {
+        if (loc.getWorld() != null && loc.getWorld().isChunkLoaded(chunkX, chunkZ)) {
           batches.computeIfAbsent(key, ignored -> new HashMap<>()).put(loc, ghost.data);
         }
       } catch (Throwable ignored) {
@@ -139,13 +139,13 @@ public final class GhostBlockManager {
       } catch (Throwable ignored) {
       }
     }
-    long id = nextId.incrementAndGet();
+    long groupId = nextId.incrementAndGet();
     GhostGroup group = new GhostGroup(viewerId, sentLocations, ghosts,
         Bukkit.getCurrentTick() + ttlTicks);
     group.onRevert = onRevert;
-    groups.put(id, group);
-    Bukkit.getScheduler().runTaskLater(plugin, () -> revert(id), Math.max(1L, ttlTicks));
-    return id;
+    groups.put(groupId, group);
+    Bukkit.getScheduler().runTaskLater(plugin, () -> revert(groupId), Math.max(1L, ttlTicks));
+    return groupId;
   }
 
   public void revert(long groupId) {
@@ -182,17 +182,17 @@ public final class GhostBlockManager {
   }
 
   public void revertAll() {
-    for (Long id : new ArrayList<>(groups.keySet())) {
-      revert(id);
+    for (Long groupId : new ArrayList<>(groups.keySet())) {
+      revert(groupId);
     }
   }
 
   public void revertAllFor(UUID viewerId) {
     perPlayerChunks.remove(viewerId);
-    for (Long id : new ArrayList<>(groups.keySet())) {
-      GhostGroup group = groups.get(id);
+    for (Long groupId : new ArrayList<>(groups.keySet())) {
+      GhostGroup group = groups.get(groupId);
       if (group != null && group.viewerId.equals(viewerId)) {
-        revert(id);
+        revert(groupId);
       }
     }
   }
@@ -208,15 +208,15 @@ public final class GhostBlockManager {
     if (clicked == null) {
       return false;
     }
-    for (Long id : new ArrayList<>(groups.keySet())) {
-      GhostGroup group = groups.get(id);
+    for (Long groupId : new ArrayList<>(groups.keySet())) {
+      GhostGroup group = groups.get(groupId);
       if (group == null || !group.revertOnInteract
           || !group.viewerId.equals(player.getUniqueId())) {
         continue;
       }
       for (Location loc : group.locations) {
         if (loc.equals(clicked)) {
-          revert(id);
+          revert(groupId);
           return true;
         }
       }
@@ -227,8 +227,8 @@ public final class GhostBlockManager {
   public boolean isGhostBlock(Location loc) {
     if (loc == null) return false;
     for (GhostGroup group : groups.values()) {
-      for (Location gl : group.locations) {
-        if (gl.equals(loc)) return true;
+      for (Location ghostLocation : group.locations) {
+        if (ghostLocation.equals(loc)) return true;
       }
     }
     return false;
@@ -237,10 +237,10 @@ public final class GhostBlockManager {
   public boolean isGhostBlockAt(Location loc) {
     if (loc == null) return false;
     for (GhostGroup group : groups.values()) {
-      for (Location gl : group.locations) {
-        if (gl.getBlockX() == loc.getBlockX()
-            && gl.getBlockY() == loc.getBlockY()
-            && gl.getBlockZ() == loc.getBlockZ()) {
+      for (Location ghostLocation : group.locations) {
+        if (ghostLocation.getBlockX() == loc.getBlockX()
+            && ghostLocation.getBlockY() == loc.getBlockY()
+            && ghostLocation.getBlockZ() == loc.getBlockZ()) {
           return true;
         }
       }

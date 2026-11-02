@@ -102,7 +102,7 @@ public class UnwipeCommand implements CommandExecutor, TabCompleter {
     }
 
     Bukkit.getOnlinePlayers().stream()
-        .filter(p -> p.hasPermission("donutrecreation.*"))
+        .filter(player -> player.hasPermission("donutrecreation.*"))
         .forEach(op -> op.sendMessage(plugin.color(
             "&a[&2UNWIPE&a] &f" + sender.getName() + " &7unwiped &f"
                 + (target.getName() != null ? target.getName() : targetName)
@@ -141,10 +141,10 @@ public class UnwipeCommand implements CommandExecutor, TabCompleter {
     }
     if (args.length == 1) {
       List<String> names = new ArrayList<>();
-      for (Player p : Bukkit.getOnlinePlayers()) {
-        if (p.getName().toLowerCase(Locale.ROOT)
+      for (Player player : Bukkit.getOnlinePlayers()) {
+        if (player.getName().toLowerCase(Locale.ROOT)
             .startsWith(args[0].toLowerCase(Locale.ROOT))) {
-          names.add(p.getName());
+          names.add(player.getName());
         }
       }
       return names;

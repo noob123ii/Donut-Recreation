@@ -53,10 +53,10 @@ public final class PearlKeeper implements Listener {
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onQuit(PlayerQuitEvent event) {
-    UUID id = event.getPlayer().getUniqueId();
-    pearls.entrySet().removeIf(e -> e.getValue().equals(id));
-    deadOwners.remove(id);
-    teleportedAt.remove(id);
+    UUID playerId = event.getPlayer().getUniqueId();
+    pearls.entrySet().removeIf(e -> e.getValue().equals(playerId));
+    deadOwners.remove(playerId);
+    teleportedAt.remove(playerId);
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
@@ -88,16 +88,16 @@ public final class PearlKeeper implements Listener {
         && (long) Bukkit.getCurrentTick() - teleported < TELEPORT_CONSUME_TICKS) {
       return;
     }
-    Location loc = pearl.getLocation();
+    Location location = pearl.getLocation();
     Vector velocity = pearl.getVelocity();
-    if (loc.getWorld() == null) {
+    if (location.getWorld() == null) {
       return;
     }
     Player ownerPlayer = Bukkit.getPlayer(owner);
     if (ownerPlayer == null) {
       return;
     }
-    EnderPearl replacement = loc.getWorld().spawn(loc, EnderPearl.class, p -> {
+    EnderPearl replacement = location.getWorld().spawn(location, EnderPearl.class, p -> {
       p.setVelocity(velocity);
       p.setShooter(ownerPlayer);
     });

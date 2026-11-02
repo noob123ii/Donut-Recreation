@@ -133,7 +133,7 @@ public final class McFunctionConverter {
   }
 
   private static ParsedEntry parseSetblock(String line) {
-    String[] parts = line.split("\\s+");
+    String[] parts = line.split("\\line+");
     if (parts.length < 5) {
       return null;
     }
@@ -267,11 +267,11 @@ public final class McFunctionConverter {
     }
     BlockData air = Material.AIR.createBlockData();
     int added = 0;
-    for (int bx = minX; bx <= maxX; bx++) {
-      for (int by = minY; by <= maxY; by++) {
-        for (int bz = minZ; bz <= maxZ; bz++) {
-          if (!occupied.contains(bx + "," + by + "," + bz)) {
-            blocks.add(new StashManager.StashBlock(bx, by, bz, air));
+    for (int baseX = minX; baseX <= maxX; baseX++) {
+      for (int baseY = minY; baseY <= maxY; baseY++) {
+        for (int baseZ = minZ; baseZ <= maxZ; baseZ++) {
+          if (!occupied.contains(baseX + "," + baseY + "," + baseZ)) {
+            blocks.add(new StashManager.StashBlock(baseX, baseY, baseZ, air));
             added++;
           }
         }
@@ -288,15 +288,15 @@ public final class McFunctionConverter {
                                StashManager.StashEntity entity) {
   }
 
-  private static int parseRelCoord(String s) {
-    if (!s.startsWith("~")) {
+  private static int parseRelCoord(String line) {
+    if (!line.startsWith("~")) {
       try {
-        return Integer.parseInt(s);
+        return Integer.parseInt(line);
       } catch (NumberFormatException e) {
         return 0;
       }
     }
-    String rest = s.substring(1);
+    String rest = line.substring(1);
     if (rest.isEmpty()) {
       return 0;
     }

@@ -197,20 +197,20 @@ public class OreCacheStorage {
 
     private FileHandle curHandle() throws IOException {
       Path currentPath = curPath();
-      FileHandle handle = handles.get(currentPath);
-      if (handle == null || handle.isFull()) {
-        handle = new FileHandle(nextPath());
-        handles.put(handle.getPath(), handle);
+      FileHandle handlePacket = handles.get(currentPath);
+      if (handlePacket == null || handlePacket.isFull()) {
+        handlePacket = new FileHandle(nextPath());
+        handles.put(handlePacket.getPath(), handlePacket);
       }
-      return handle;
+      return handlePacket;
     }
 
     void saveChunk(int chunkX, int chunkZ, Set<Long> orePositions, long worldSeed) throws IOException {
       long key = chunkKey(chunkX, chunkZ);
       memCache.put(key, new HashSet<>(orePositions));
 
-      FileHandle handle = curHandle();
-      handle.writeChunk(key, orePositions, worldSeed);
+      FileHandle handlePacket = curHandle();
+      handlePacket.writeChunk(key, orePositions, worldSeed);
     }
 
     ChunkData loadChunk(int chunkX, int chunkZ) throws IOException {
@@ -257,8 +257,8 @@ public class OreCacheStorage {
 
     void clearAll() throws IOException {
       memCache.clear();
-      for (FileHandle handle : handles.values()) {
-        handle.close();
+      for (FileHandle handlePacket : handles.values()) {
+        handlePacket.close();
       }
       handles.clear();
 

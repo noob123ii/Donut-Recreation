@@ -9,13 +9,13 @@ import org.bukkit.entity.Player;
 @SuppressWarnings({"checkstyle:MissingJavadocType", "checkstyle:MissingJavadocMethod"})
 public final class ExplosionDamper {
 
-  private final RevealManager rm;
+  private final RevealManager revealManager;
 
-  public ExplosionDamper(RevealManager rm) {
-    this.rm = rm;
+  public ExplosionDamper(RevealManager revealManager) {
+    this.revealManager = revealManager;
   }
 
-  public boolean handle(PacketSendEvent event, Player viewer) {
+  public boolean handlePacket(PacketSendEvent event, Player viewer) {
     if (viewer == null) {
       return false;
     }
@@ -25,16 +25,16 @@ public final class ExplosionDamper {
     } catch (Throwable ignored) {
       return false;
     }
-    Vector3d pos;
+    Vector3d position;
     try {
-      pos = wrapper.getPosition();
+      position = wrapper.getPosition();
     } catch (Throwable ignored) {
       return false;
     }
-    if (pos == null) {
+    if (position == null) {
       return false;
     }
-    if (rm.shouldSuppressEntityFor(viewer, pos.getX(), pos.getY(), pos.getZ())) {
+    if (revealManager.isPositionHidden(viewer, position.getX(), position.getY(), position.getZ())) {
       event.setCancelled(true);
       return true;
     }
