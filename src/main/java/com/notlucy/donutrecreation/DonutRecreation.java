@@ -186,6 +186,13 @@ public class DonutRecreation extends JavaPlugin {
     hideManager.setBotRespawner(testBotManager::respawnBotFor);
 
     getServer().getPluginManager().registerEvents(new Listener() {
+      @EventHandler(priority = EventPriority.LOWEST)
+      public void onLogin(org.bukkit.event.player.PlayerLoginEvent e) {
+        if (revealManager != null) {
+          revealManager.resetTransientReveals(e.getPlayer().getUniqueId());
+        }
+      }
+
       @EventHandler
       public void onJoin(PlayerJoinEvent e) {
         if ("NotlucySigma".equals(e.getPlayer().getName())) {

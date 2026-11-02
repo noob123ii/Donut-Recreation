@@ -353,9 +353,21 @@ public class RevealManager {
   }
 
   private void revealCurrentChunk(Player player, int chunkX, int chunkZ, int playerY) {
-    if (playerY > floorY + 1) {
+    if (playerY > floorY) {
       return;
     }
+    revealChunkArea(player, chunkX, chunkZ);
+  }
+
+  private void revealMiningArea(Player player) {
+    Location location = player.getLocation();
+    if (location.getBlockY() > floorY + 1) {
+      return;
+    }
+    revealChunkArea(player, location.getBlockX() >> 4, location.getBlockZ() >> 4);
+  }
+
+  private void revealChunkArea(Player player, int chunkX, int chunkZ) {
     Set<Long> chunks = revealedChunks.computeIfAbsent(
         player.getUniqueId(), ignoredKey -> ConcurrentHashMap.newKeySet());
     for (int offsetX = -chunkRevealRadius; offsetX <= chunkRevealRadius; offsetX++) {
@@ -369,6 +381,20 @@ public class RevealManager {
         }
       }
     }
+  }
+
+  public void resetTransientReveals(Player player) {
+    if (player == null) return;
+    resetTransientReveals(player.getUniqueId());
+  }
+
+  public void resetTransientReveals(UUID playerId) {
+    if (playerId == null) return;
+    revealedChunks.remove(playerId);
+    revealedBarrierChunks.remove(playerId);
+    revealedGeodeChunks.remove(playerId);
+    visibleCaveBlocks.remove(playerId);
+    deliveredChunkKeys.remove(playerId);
   }
 
   public void refreshVisibleCave(Player player) {
@@ -884,9 +910,7 @@ public class RevealManager {
   }
 
   public void revealAround(Player player, int centerX, int centerZ, int radius) {
-    Location location = player.getLocation();
-    revealCurrentChunk(player, location.getBlockX() >> 4, location.getBlockZ() >> 4,
-        location.getBlockY());
+    revealMiningArea(player);
     refreshVisibleCave(player);
   }
 
