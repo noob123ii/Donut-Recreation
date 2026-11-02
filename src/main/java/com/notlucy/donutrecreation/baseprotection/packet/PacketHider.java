@@ -28,6 +28,7 @@ import com.github.retrooper.packetevents.wrapper.PacketWrapper;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerAddTransientBlock;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerAttachEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockAction;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCamera;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCollectItem;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDamageEvent;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerDebugBlockValue;
@@ -47,6 +48,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEn
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityStatus;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityTeleport;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerEntityVelocity;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerFacePlayer;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerGameTestHighlightPos;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerHurtAnimation;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMoveMinecart;
@@ -61,6 +63,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSp
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnPlayer;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSpawnWeatherEntity;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
+import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUseBed;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateEntityNBT;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
@@ -164,6 +167,13 @@ public class PacketHider {
         (event, player) -> handleEntityPacket(event, player,
             new WrapperPlayServerProjectilePower(event).getEntityId()));
     registerHandler(PacketType.Play.Server.DAMAGE_EVENT, this::handleDamageEvent);
+    registerHandler(PacketType.Play.Server.CAMERA, this::handleCamera);
+    registerHandler(PacketType.Play.Server.FACE_PLAYER, this::handleFacePlayer);
+    registerHandler(PacketType.Play.Server.USE_BED, this::handleUseBed);
+    registerHandler(PacketType.Play.Server.WAYPOINT,
+        (event, player) -> event.setCancelled(true));
+    registerHandler(PacketType.Play.Server.SCULK_VIBRATION_SIGNAL,
+        (event, player) -> event.setCancelled(true));
     registerHandler(PacketType.Play.Server.ATTACH_ENTITY, this::handleAttachEntity);
     registerHandler(PacketType.Play.Server.SET_PASSENGERS, this::handleSetPassengers);
     registerHandler(PacketType.Play.Server.COLLECT_ITEM, this::handleCollectItem);
@@ -535,9 +545,46 @@ public class PacketHider {
 
   private void handleDamageEvent(PacketSendEvent event, Player player) {
     var packet = new WrapperPlayServerDamageEvent(event);
+    Vector3d sourcePosition = packet.getSourcePosition();
     if (isHiddenEntity(player, packet.getEntityId())
         || isHiddenEntity(player, packet.getSourceCauseId())
-        || isHiddenEntity(player, packet.getSourceDirectId())) {
+        || isHiddenEntity(player, packet.getSourceDirectId())
+        || (sourcePosition != null && isHiddenBlock(player,
+            sourcePosition.getX(), sourcePosition.getY(), sourcePosition.getZ()))) {
+      event.setCancelled(true);
+    }
+  }
+
+  private void handleCamera(PacketSendEvent event, Player player) {
+    var packet = new WrapperPlayServerCamera(event);
+    if (isHiddenEntity(player, packet.getCameraId())) {
+      event.setCancelled(true);
+    }
+  }
+
+  private void handleFacePlayer(PacketSendEvent event, Player player) {
+    var packet = new WrapperPlayServerFacePlayer(event);
+    Vector3d targetPosition = packet.getTargetPosition();
+    if (targetPosition != null && isHiddenBlock(player,
+        targetPosition.getX(), targetPosition.getY(), targetPosition.getZ())) {
+      event.setCancelled(true);
+      return;
+    }
+    var targetEntity = packet.getTargetEntity();
+    if (targetEntity != null && isHiddenEntity(player, targetEntity.getEntityId())) {
+      event.setCancelled(true);
+    }
+  }
+
+  private void handleUseBed(PacketSendEvent event, Player player) {
+    var packet = new WrapperPlayServerUseBed(event);
+    Vector3i position = packet.getPosition();
+    if (position != null && isHiddenBlock(player,
+        position.getX(), position.getY(), position.getZ())) {
+      event.setCancelled(true);
+      return;
+    }
+    if (isHiddenEntity(player, packet.getEntityId())) {
       event.setCancelled(true);
     }
   }

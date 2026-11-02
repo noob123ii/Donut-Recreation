@@ -189,7 +189,8 @@ public final class DeepslateProtection {
     }
     int upperY = revealManager.upperBarrierY();
     if (upperY > floorY && y < upperY) {
-      if (revealManager.isBarrierBandRevealed(player, chunkX, chunkZ)) {
+      if (revealManager.isCaveBlockVisible(player, x, y, z)
+          || revealManager.isBarrierBandRevealed(player, chunkX, chunkZ)) {
         return false;
       }
       var state = wrapper.getBlockState();

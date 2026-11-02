@@ -53,9 +53,16 @@ public final class MultiBlockChangeHandler {
       }
       boolean belowFloor = blockY < floorY;
       boolean barrierBand = !belowFloor && blockY < upperY;
-      boolean visible = belowFloor
-          ? revealManager.isCaveBlockVisible(player, blockX, blockY, blockZ)
-          : (!barrierBand || upperRevealed);
+      boolean caveVisible = revealManager.isCaveBlockVisible(player, blockX, blockY, blockZ);
+      boolean visible;
+      if (belowFloor) {
+        visible = caveVisible
+            || revealManager.isChunkRevealed(player, blockX >> 4, blockZ >> 4);
+      } else if (barrierBand) {
+        visible = caveVisible || upperRevealed;
+      } else {
+        visible = true;
+      }
       if (!visible && (belowFloor || barrierBand)) {
         boolean bandSpawner = barrierBand && encodedBlock.getBlockId() == spawnerId;
         if (!bandSpawner) {

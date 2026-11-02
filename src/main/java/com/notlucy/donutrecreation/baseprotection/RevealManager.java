@@ -209,7 +209,7 @@ public class RevealManager {
   }
 
   public boolean isCaveBlockVisible(Player player, int x, int y, int z) {
-    if (y >= floorY) return false;
+    if (y >= upperY) return false;
     ConcurrentMap<Long, LongOpenHashSet> byChunk = visibleCaveBlocks.get(player.getUniqueId());
     if (byChunk == null) return false;
     LongOpenHashSet blocks = byChunk.get(chunkKey(x >> 4, z >> 4));
@@ -242,12 +242,11 @@ public class RevealManager {
   public boolean isPositionVisible(Player player, int x, int y, int z) {
     if (player == null) return false;
     if (y >= upperY) return true;
-    int chunkX = x >> 4;
-    int chunkZ = z >> 4;
+    if (isCaveBlockVisible(player, x, y, z)) return true;
     if (y < floorY) {
-      return isCaveBlockVisible(player, x, y, z);
+      return isChunkRevealed(player, x >> 4, z >> 4);
     }
-    return isBarrierBandRevealed(player, chunkX, chunkZ);
+    return isBarrierBandRevealed(player, x >> 4, z >> 4);
   }
 
   /** Returns whether any part of a chunk column is currently visible. */
@@ -365,6 +364,7 @@ public class RevealManager {
       return;
     }
 
+    revealCurrentChunk(player, playerChunkX, playerChunkZ, playerY);
     refreshVisibleCave(player);
     refreshBarrierBand(player, playerId, playerChunkX, playerChunkZ, playerY);
     refreshGeodeVisibility(player);
@@ -372,10 +372,23 @@ public class RevealManager {
     refreshEntityVisibility(player);
   }
 
+  private void revealCurrentChunk(Player player, int chunkX, int chunkZ, int playerY) {
+    if (playerY > floorY) {
+      return;
+    }
+    Set<Long> chunks = revealedChunks.computeIfAbsent(
+        player.getUniqueId(), ignoredKey -> ConcurrentHashMap.newKeySet());
+    long key = chunkKey(chunkX, chunkZ);
+    if (chunks.add(key)) {
+      revealUndergroundChunks(player, chunkX, chunkZ);
+      notifyChunkRevealed(player, chunkX, chunkZ);
+    }
+  }
+
   public void refreshVisibleCave(Player player) {
     if (!player.isOnline()) return;
     Location location = player.getLocation();
-    if (location.getBlockY() > floorY) return;
+    if (location.getBlockY() >= upperY) return;
     World world = location.getWorld();
     if (world == null) return;
 
@@ -385,7 +398,7 @@ public class RevealManager {
     Map<Long, LongOpenHashSet> additions = new HashMap<>();
 
     int startX = location.getBlockX();
-    int startY = Math.min(location.getBlockY(), floorY - 1);
+    int startY = Math.min(location.getBlockY(), upperY - 1);
     int startZ = location.getBlockZ();
     int minY = Math.max(worldMinY, world.getMinHeight());
     if (startY < minY) return;
@@ -409,7 +422,7 @@ public class RevealManager {
         int neighborX = x + NX[direction];
         int neighborY = y + NY[direction];
         int neighborZ = z + NZ[direction];
-        if (neighborY >= floorY || neighborY < minY) continue;
+        if (neighborY >= upperY || neighborY < minY) continue;
         int deltaX = neighborX - startX;
         int deltaY = neighborY - startY;
         int deltaZ = neighborZ - startZ;

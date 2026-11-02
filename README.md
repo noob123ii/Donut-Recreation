@@ -87,11 +87,11 @@ AIR until the viewer is within render distance.
 **Sound & particle dampers:** Certain sounds/particles that leak hidden chunk data are
 suppressed or re-spatialised.
 
-**Cave volume reveal:** While below the floor, the hider fills the connected cave volume
-within a bounded radius and unmasks only that volume and its visible surfaces. Caves behind
-walls or outside the radius stay masked, and solid blocks under the cave stay deepslate.
-Revealed cave and barrier blocks stay visible after returning above the floor and are
-rehidden only when their chunk unloads.
+**Cave volume reveal:** The chunk you are physically in is fully revealed below the floor
+so mining and base finding work normally. Other chunks use a bounded cave-volume fill and
+surface detection, so caves behind walls or outside the radius stay masked. The visible
+layer above the floor is included, and revealed cave and barrier blocks stay visible after
+returning above the floor until their chunk unloads.
 
 **Salt rotation:** Noise pattern is salted per-player and rotates periodically (default
 12,000 ticks). Prevents clients from building a static map of the fake floor.
@@ -108,7 +108,9 @@ client-side bypass permission.
 Every block-bearing packet is filtered on the wire, including chunk data, light updates,
 single and multi block changes, block entity data, block actions, break animations,
 sign updates, transient blocks, `/debug` block/chunk/entity values and game-test
-highlights. Entity packets are filtered too: all modern spawn packets (generic, living,
+highlights. Player-detection vectors are also blocked: locator-bar waypoints, sculk
+vibration signals, spectator camera targets, forced look-at packets, bed packets and damage
+source positions. Entity packets are filtered too: all modern spawn packets (generic, living,
 player, experience orb, painting, weather), position sync / teleport / relative movement,
 metadata, equipment, status, velocity, effects, passengers, NBT and destroy packets.
 Block-entity, sound, particle and explosion packets are masked for unrevealed regions.
