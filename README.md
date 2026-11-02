@@ -74,10 +74,11 @@ Not a traditional ore-obfuscator — masks everything below a configurable Y-lev
 - Upper (`barrier-upper-y`): the band between lower and upper is masked while the player
   is above the upper threshold. Set equal to hide-below-y to disable.
 
-**Geode hiding:** Fake amethyst geodes generated underground with realistic Minecraft layers:
-smooth basalt shell, calcite ring, amethyst block/budding amethyst layer (8% budding chance),
-and a deepslate core with amethyst clusters and buds. Generated in ~8% of chunks between
-Y=-40 and Y=10. Geode data persists across restarts.
+**Geode hiding:** Every amethyst-family block is masked: amethyst blocks, budding amethyst,
+clusters, buds, calcite, and smooth basalt. Geodes stay fully invisible even in revealed
+chunks, visible caves, and the player's current chunk. The scan covers the full geode height
+range and uses a versioned cache, so old partial scans are rescanned. Fake geode decoys are
+disabled by default and can be re-enabled with `hider.fake-geode-amethyst-per-chunk`.
 
 **Spawner masking:** Spawners above the floor are replaced with deepslate and cannot be broken.
 

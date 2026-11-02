@@ -38,7 +38,6 @@ public final class AmethystProtection {
     }
     int chunkX = column.getX();
     int chunkZ = column.getZ();
-    int floorSection = revealManager.hideBelowY() >> 4;
     int minSection = revealManager.worldMinY() >> 4;
 
     long key = RevealManager.chunkKey(chunkX, chunkZ);
@@ -47,7 +46,7 @@ public final class AmethystProtection {
 
     if (positions == null || !revealManager.wasGeodeScanned(key)) {
       try {
-        positions = scanForAmethyst(sections, chunkX, chunkZ, minSection, floorSection, litSections);
+        positions = scanForAmethyst(sections, chunkX, chunkZ, minSection, litSections);
       } catch (Throwable e) {
         LogData.get().warning("[geode] scan crashed at " + chunkX + "," + chunkZ + ": " + e);
         return false;
@@ -70,9 +69,7 @@ public final class AmethystProtection {
       return false;
     }
 
-    enhanceGeodeBuds(sections, positions, minSection);
-
-    int swapped = maskPositions(sections, positions, minSection, revealManager.hideBelowY(), player);
+    int swapped = maskPositions(sections, positions, minSection);
     if (swapped <= 0) {
       return false;
     }
@@ -111,12 +108,8 @@ public final class AmethystProtection {
 
     syncCache(nowAmethyst, wasAmethyst, x, y, z);
 
-    if (revealManager.isCaveBlockVisible(player, x, y, z)) {
-      return false;
-    }
-    if ((nowAmethyst || wasAmethyst) && !revealManager.isGeodeVisibleTo(player, x >> 4, z >> 4)) {
-      int target = blockIds.floorId();
-      wrapper.setBlockState(WrappedBlockState.getByGlobalId(target));
+    if (nowAmethyst || wasAmethyst) {
+      wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.floorId()));
       return true;
     }
     return false;
@@ -131,26 +124,17 @@ public final class AmethystProtection {
     var section = wrapper.getChunkPosition();
     int chunkX = section.getX();
     int chunkZ = section.getZ();
-    boolean revealedHere = revealManager.isGeodeVisibleTo(player, chunkX, chunkZ);
     Set<Long> positions = revealManager.geodePositions(RevealManager.chunkKey(chunkX, chunkZ));
 
     int swaps = 0;
-    int floorY = revealManager.hideBelowY();
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(player.getUniqueId());
 
     for (var enc : wrapper.getBlocks()) {
       int blockY = enc.getY();
-      if (blockY < floorY && !chunkRevealed) {
-        continue;
-      }
-
       int blockX = enc.getX();
       int blockZ = enc.getZ();
       if (checkGhosts && revealManager.hasGhostBlockAt(
           player.getUniqueId(), blockX, blockY, blockZ)) {
-        continue;
-      }
-      if (revealManager.isCaveBlockVisible(player, blockX, blockY, blockZ)) {
         continue;
       }
       int blockId = enc.getBlockId();
@@ -160,10 +144,8 @@ public final class AmethystProtection {
 
       syncCache(nowAmethyst, wasAmethyst, blockX, blockY, blockZ);
 
-      boolean visibleHere = blockY >= floorY && revealedHere;
-      if (!visibleHere && (nowAmethyst || wasAmethyst)) {
-        int target = blockIds.floorId();
-        enc.setBlockId(target);
+      if (nowAmethyst || wasAmethyst) {
+        enc.setBlockId(blockIds.floorId());
         swaps++;
       }
     }
@@ -177,16 +159,16 @@ public final class AmethystProtection {
 
   private Set<Long> scanForAmethyst(
       BaseChunk[] sections, int chunkX, int chunkZ,
-      int minSection, int floorSection, BitSet litSections) {
+      int minSection, BitSet litSections) {
     Set<Long> allAmethyst = new HashSet<>();
 
-    /* Vanilla geodes stay low in the world; scanning the full column is wasteful. */
-    int maxScanSection = Math.max(floorSection, 2);
+    /* Scan every section that can contain a vanilla geode. */
+    int maxScanSection = Math.max(2, minSection);
     int baseX = chunkX << 4;
     int baseZ = chunkZ << 4;
     for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
       int sectionY = minSection + sectionIndex;
-      if (sectionY < floorSection || sectionY > maxScanSection) {
+      if (sectionY < minSection || sectionY > maxScanSection) {
         continue;
       }
       BaseChunk section = sections[sectionIndex];
@@ -200,7 +182,8 @@ public final class AmethystProtection {
           for (int z = 0; z < 16; z++) {
             int blockId = section.getBlockId(x, y, z);
             if (blockIds.isAmethyst(blockId)) {
-              allAmethyst.add(RevealManager.packPos(baseX + x, (sectionY << 4) + y, baseZ + z));
+              allAmethyst.add(RevealManager.packPos(
+                  baseX + x, (sectionY << 4) + y, baseZ + z));
               any = true;
             }
           }
@@ -210,89 +193,15 @@ public final class AmethystProtection {
         litSections.set(sectionIndex);
       }
     }
-
-    Set<Long> clustered = new HashSet<>();
-    if (allAmethyst.size() < 20) {
-
-      return clustered;
-    }
-
-    for (long packed : allAmethyst) {
-      int amethystX = RevealManager.unpackX(packed);
-      int amethystY = RevealManager.unpackY(packed);
-      int amethystZ = RevealManager.unpackZ(packed);
-      int neighbors = 0;
-
-      for (int offsetX = -1; offsetX <= 1; offsetX++) {
-        for (int offsetY = -1; offsetY <= 1; offsetY++) {
-          for (int offsetZ = -1; offsetZ <= 1; offsetZ++) {
-            if (offsetX == 0 && offsetY == 0 && offsetZ == 0) continue;
-            long neighborPacked = RevealManager.packPos(amethystX + offsetX, amethystY + offsetY, amethystZ + offsetZ);
-
-            if (allAmethyst.contains(neighborPacked)) {
-              neighbors++;
-            } else {
-
-              int neighborCx = (amethystX + offsetX) >> 4;
-              int neighborCz = (amethystZ + offsetZ) >> 4;
-              if (neighborCx != chunkX || neighborCz != chunkZ) {
-                Set<Long> neighborChunkPos = revealManager.geodePositions(RevealManager.chunkKey(neighborCx, neighborCz));
-                if (neighborChunkPos != null && neighborChunkPos.contains(neighborPacked)) {
-                  neighbors++;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      if (neighbors >= 3) {
-        clustered.add(packed);
-      }
-    }
-
-    return clustered;
+    return allAmethyst;
   }
 
-  private void enhanceGeodeBuds(BaseChunk[] sections, Set<Long> positions, int minSection) {
-    int largeBudId = blockIds.largeBudId();
-    int replaced = 0;
-    for (long packed : positions) {
-      int worldX = RevealManager.unpackX(packed);
-      int worldY = RevealManager.unpackY(packed);
-      int worldZ = RevealManager.unpackZ(packed);
-      int sectionIndex = (worldY >> 4) - minSection;
-      if (sectionIndex < 0 || sectionIndex >= sections.length) continue;
-      BaseChunk section = sections[sectionIndex];
-      if (section == null) continue;
-      int localX = worldX & 0xF;
-      int localY = worldY & 0xF;
-      int localZ = worldZ & 0xF;
-      int currentId = section.getBlockId(localX, localY, localZ);
-      if (blockIds.isAmethyst(currentId) && currentId != blockIds.decoyClusterId()
-          && currentId != blockIds.amethystBlockId()) {
-        int hash = (worldX * 374761393 ^ worldZ * 668265263 ^ worldY * 1274126177);
-        hash = (hash ^ (hash >> 13)) * 1274126177;
-        hash = hash ^ (hash >> 16);
-        if ((hash & 0x7FFFFFFF) % 9 == 0) {
-          section.set(localX, localY, localZ, largeBudId);
-          replaced++;
-        }
-      }
-    }
-  }
-
-  private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection,
-      int floorY, Player player) {
+  private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection) {
     int swapped = 0;
     for (long packed : positions) {
       int worldX = RevealManager.unpackX(packed);
       int worldY = RevealManager.unpackY(packed);
       int worldZ = RevealManager.unpackZ(packed);
-      if (revealManager.isCaveBlockVisible(player, worldX, worldY, worldZ)
-          || revealManager.isChunkRevealed(player, worldX >> 4, worldZ >> 4)) {
-        continue;
-      }
 
       int sectionIndex = (worldY >> 4) - minSection;
       if (sectionIndex < 0 || sectionIndex >= sections.length) {
