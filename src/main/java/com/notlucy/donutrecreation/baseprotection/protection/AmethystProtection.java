@@ -289,7 +289,8 @@ public final class AmethystProtection {
       int worldX = RevealManager.unpackX(packed);
       int worldY = RevealManager.unpackY(packed);
       int worldZ = RevealManager.unpackZ(packed);
-      if (revealManager.isCaveBlockVisible(player, worldX, worldY, worldZ)) {
+      if (revealManager.isCaveBlockVisible(player, worldX, worldY, worldZ)
+          || revealManager.isChunkRevealed(player, worldX >> 4, worldZ >> 4)) {
         continue;
       }
 
