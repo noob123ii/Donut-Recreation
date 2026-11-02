@@ -37,16 +37,21 @@ public final class MultiBlockChangeHandler {
     boolean chunkRevealed = revealManager.isChunkRevealed(player, chunkX, chunkZ);
     boolean upperRevealed = revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
     int salt = revealManager.getPlayerSalt(player.getUniqueId());
+    int floorY = revealManager.hideBelowY();
+    int spawnerMaskAboveY = revealManager.spawnerMaskAboveY();
+    boolean checkGhosts = revealManager.hasAnyGhostBlocks(player.getUniqueId());
     int floorFixes = 0, spawnerFixes = 0;
     int spawnerId = deepslate.spawnerId();
 
     for (var encodedBlock : wrapper.getBlocks()) {
-      if (ghostBlockManager != null
-          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), encodedBlock.getX(), encodedBlock.getY(), encodedBlock.getZ())) {
+      if (checkGhosts && ghostBlockManager != null
+          && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), encodedBlock.getX(),
+              encodedBlock.getY(), encodedBlock.getZ())) {
         continue;
       }
       if (deepslate.shouldMaskMultiBlock(encodedBlock.getY(), chunkRevealed, upperRevealed)) {
-        boolean bandSpawner = encodedBlock.getY() >= revealManager.hideBelowY() && encodedBlock.getBlockId() == spawnerId;
+        boolean bandSpawner = encodedBlock.getY() >= floorY
+            && encodedBlock.getBlockId() == spawnerId;
         if (!bandSpawner) {
           int want = deepslate.floorIdAt(salt, encodedBlock.getX(), encodedBlock.getY(), encodedBlock.getZ());
           if (encodedBlock.getBlockId() != want) {
@@ -54,7 +59,8 @@ public final class MultiBlockChangeHandler {
             floorFixes++;
           }
         }
-      } else if (encodedBlock.getY() > revealManager.spawnerMaskAboveY() && encodedBlock.getBlockId() == spawnerId
+      } else if (encodedBlock.getY() > spawnerMaskAboveY
+          && encodedBlock.getBlockId() == spawnerId
           && !deepslate.isNearSpawner(player, encodedBlock.getX(), encodedBlock.getY(), encodedBlock.getZ())) {
         encodedBlock.setBlockId(deepslate.stoneId());
         spawnerFixes++;

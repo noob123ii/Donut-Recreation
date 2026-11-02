@@ -174,6 +174,10 @@ public class RevealManager {
     return ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, x, y, z);
   }
 
+  public boolean hasAnyGhostBlocks(java.util.UUID playerId) {
+    return ghostBlockManager != null && ghostBlockManager.hasGhostBlocksFor(playerId);
+  }
+
   public static long chunkKey(int chunkX, int chunkZ) {
     return (((long) chunkX) << 32) | (chunkZ & 0xFFFFFFFFL);
   }
@@ -417,12 +421,13 @@ public class RevealManager {
       return;
     }
     Set<Long> keep = new HashSet<>(desiredChunks);
+    int playerY = player.getLocation().getBlockY();
     /* Sticky chunks apply only while the player is below the floor. */
-    if (player.getLocation().getBlockY() < floorY) {
+    if (playerY < floorY) {
       addChunkSquare(keep, playerChunkX, playerChunkZ, stickyRadius);
     }
-    int budget = player.getLocation().getBlockY() >= upperY
-        ? Integer.MAX_VALUE : maxHidePerRecompute;
+    int budget = playerY >= floorY
+        ? 256 : maxHidePerRecompute;
     for (long key : new HashSet<>(currentlyRevealed)) {
       if (keep.contains(key)) {
         continue;
@@ -772,7 +777,7 @@ public class RevealManager {
     if (!world.isChunkLoaded(chunkX, chunkZ)) return;
     if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) return;
 
-    ChunkSnapshot snap = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot();
+    ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot();
     int minY  = Math.max(worldMinY, world.getMinHeight());
     int maxY  = floorY;
     int baseX = chunkX << 4;
@@ -781,6 +786,7 @@ public class RevealManager {
     int paletteLen = palette.length;
     int salt = getPlayerSalt(player.getUniqueId());
     UUID playerId = player.getUniqueId();
+    boolean checkGhosts = hasAnyGhostBlocks(playerId);
 
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
@@ -790,10 +796,10 @@ public class RevealManager {
       for (int z = 0; z < 16; z++) {
         int worldZ = baseZ + z;
         for (int y = minY; y < maxY; y++) {
-          if (ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
+          if (checkGhosts && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
             continue;
           }
-          BlockData real = snap.getBlockData(x, y, z);
+          BlockData real = snapshot.getBlockData(x, y, z);
           BlockData fake = palette[
               Math.floorMod(noiseHash(worldX ^ salt, y, worldZ ^ salt), paletteLen)];
           if (real.equals(fake)) {
@@ -820,6 +826,7 @@ public class RevealManager {
     int paletteLen = palette.length;
     int salt = getPlayerSalt(player.getUniqueId());
     UUID playerId = player.getUniqueId();
+    boolean checkGhosts = hasAnyGhostBlocks(playerId);
 
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
@@ -829,7 +836,7 @@ public class RevealManager {
       for (int z = 0; z < 16; z++) {
         int worldZ = baseZ + z;
         for (int y = minY; y < maxY; y++) {
-          if (ghostBlockManager != null && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
+          if (checkGhosts && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
             continue;
           }
           int idx = Math.floorMod(noiseHash(worldX ^ salt, y, worldZ ^ salt), paletteLen);

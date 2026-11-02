@@ -83,6 +83,19 @@ public final class GhostBlockManager {
     return false;
   }
 
+  public boolean hasGhostBlocksFor(UUID playerId) {
+    ConcurrentMap<Long, List<GhostBlock>> playerChunks = perPlayerChunks.get(playerId);
+    if (playerChunks == null || playerChunks.isEmpty()) {
+      return false;
+    }
+    for (List<GhostBlock> ghosts : playerChunks.values()) {
+      if (ghosts != null && !ghosts.isEmpty()) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   public long broadcast(List<GhostBlock> ghosts, long ttlTicks, int radius, Runnable onRevert) {
     if (ghosts == null || ghosts.isEmpty()) return -1L;
     GhostBlock origin = ghosts.get(0);

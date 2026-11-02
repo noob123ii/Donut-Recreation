@@ -58,6 +58,9 @@ public final class DeepslateProtection {
     boolean lowerRevealed = revealManager.isChunkRevealed(player, chunkX, chunkZ);
     boolean upperRevealed = revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
     boolean upperActive = upperY > floorY;
+    int spawnerMaskAboveY = revealManager.spawnerMaskAboveY();
+    int spawnerStoneId = blockIds.stoneId();
+    boolean scanSpawners = spawnerMaskAboveY < player.getWorld().getMaxHeight() - 1;
 
     boolean touched = false;
     int modifiedSections = 0;
@@ -77,7 +80,7 @@ public final class DeepslateProtection {
         int toY = Math.min(16, floorY - worldOriginY);
         if (toY > 0) {
           fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, 0, toY,
-              salt, player, geodeChunk, geodeBudget);
+              salt, player, geodeChunk, geodeBudget, scanSpawners);
           touched = true;
           modifiedSections++;
         }
@@ -87,7 +90,7 @@ public final class DeepslateProtection {
         int toY = Math.min(16, upperY - worldOriginY);
         if (toY > fromY) {
           fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, fromY, toY,
-              salt, player, geodeChunk, geodeBudget);
+              salt, player, geodeChunk, geodeBudget, scanSpawners);
           touched = true;
           modifiedSections++;
         }
@@ -122,25 +125,26 @@ public final class DeepslateProtection {
         }
       }
 
-      int aboveY = revealManager.spawnerMaskAboveY();
-      int spawnerStoneId = blockIds.stoneId();
-      int spawnerMasked = 0;
-      for (int x = 0; x < 16; x++) {
-        for (int z = 0; z < 16; z++) {
-          for (int y = 0; y < 16; y++) {
-            if (section.getBlockId(x, y, z) != blockIds.spawnerId()) {
-              continue;
-            }
-            int worldY = worldOriginY + y;
-            if (worldY > aboveY && !isNearSpawner(player, worldOriginX + x, worldY, worldOriginZ + z)) {
-              section.set(x, y, z, spawnerStoneId);
-              spawnerMasked++;
+      if (scanSpawners && worldOriginY + 15 > spawnerMaskAboveY) {
+        int spawnerMasked = 0;
+        for (int x = 0; x < 16; x++) {
+          for (int z = 0; z < 16; z++) {
+            for (int y = 0; y < 16; y++) {
+              if (section.getBlockId(x, y, z) != blockIds.spawnerId()) {
+                continue;
+              }
+              int worldY = worldOriginY + y;
+              if (worldY > spawnerMaskAboveY
+                  && !isNearSpawner(player, worldOriginX + x, worldY, worldOriginZ + z)) {
+                section.set(x, y, z, spawnerStoneId);
+                spawnerMasked++;
+              }
             }
           }
         }
-      }
-      if (spawnerMasked > 0) {
-        touched = true;
+        if (spawnerMasked > 0) {
+          touched = true;
+        }
       }
     }
 
@@ -205,18 +209,19 @@ public final class DeepslateProtection {
   private void fillNoise(
       BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
       int lowY, int highY, int salt, Player player,
-      boolean geodeChunk, int[] geodeBudget) {
+      boolean geodeChunk, int[] geodeBudget, boolean preserveSpawners) {
     java.util.UUID playerId = player.getUniqueId();
+    boolean checkGhosts = revealManager.hasAnyGhostBlocks(playerId);
     for (int x = 0; x < 16; x++) {
       int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = worldOriginZ + z;
         for (int y = lowY; y < highY; y++) {
           int worldY = worldOriginY + y;
-          if (revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
+          if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
             continue;
           }
-          if (section.getBlockId(x, y, z) == blockIds.spawnerId()) {
+          if (preserveSpawners && section.getBlockId(x, y, z) == blockIds.spawnerId()) {
             continue;
           }
           int geodeBlock = 0;
@@ -230,9 +235,7 @@ public final class DeepslateProtection {
           if (geodeBlock == 0) {
             geodeBlock = blockIds.floorIdAt(salt, worldX, worldY, worldZ);
           }
-          if (section.getBlockId(x, y, z) != geodeBlock) {
-            section.set(x, y, z, geodeBlock);
-          }
+          section.set(x, y, z, geodeBlock);
         }
       }
     }

@@ -133,6 +133,7 @@ public final class AmethystProtection {
 
     int swaps = 0;
     int floorY = revealManager.hideBelowY();
+    boolean checkGhosts = revealManager.hasAnyGhostBlocks(player.getUniqueId());
 
     for (var enc : wrapper.getBlocks()) {
       int blockY = enc.getY();
@@ -142,7 +143,8 @@ public final class AmethystProtection {
 
       int blockX = enc.getX();
       int blockZ = enc.getZ();
-      if (revealManager.hasGhostBlockAt(player.getUniqueId(), blockX, blockY, blockZ)) {
+      if (checkGhosts && revealManager.hasGhostBlockAt(
+          player.getUniqueId(), blockX, blockY, blockZ)) {
         continue;
       }
       int blockId = enc.getBlockId();
@@ -171,7 +173,10 @@ public final class AmethystProtection {
       int minSection, int floorSection, BitSet litSections) {
     Set<Long> allAmethyst = new HashSet<>();
 
-    int maxScanSection = floorSection + 10;
+    /* Vanilla geodes stay low in the world; scanning the full column is wasteful. */
+    int maxScanSection = Math.max(floorSection, 2);
+    int baseX = chunkX << 4;
+    int baseZ = chunkZ << 4;
     for (int sectionIndex = 0; sectionIndex < sections.length; sectionIndex++) {
       int sectionY = minSection + sectionIndex;
       if (sectionY < floorSection || sectionY > maxScanSection) {
@@ -188,7 +193,7 @@ public final class AmethystProtection {
           for (int z = 0; z < 16; z++) {
             int blockId = section.getBlockId(x, y, z);
             if (blockIds.isAmethyst(blockId)) {
-              allAmethyst.add(RevealManager.packPos((chunkX << 4) + x, (sectionY << 4) + y, (chunkZ << 4) + z));
+              allAmethyst.add(RevealManager.packPos(baseX + x, (sectionY << 4) + y, baseZ + z));
               any = true;
             }
           }
