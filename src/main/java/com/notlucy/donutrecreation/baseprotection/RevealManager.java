@@ -91,6 +91,7 @@ public class RevealManager {
   private final int        maxHidePerRecompute;
   private final int        caveVisibleDistance;
   private final int        caveFillBudget;
+  private final int        chunkRevealRadius;
   private final BlockData[] maskPalette;
   private final int        spawnerMaskAboveY;
   private final int        spawnerRevealDistance;
@@ -127,6 +128,7 @@ public class RevealManager {
     this.maxHidePerRecompute      = Math.max(1, cfg.getInt("hider.max-hide-per-recompute", 16));
     this.caveVisibleDistance      = Math.max(16, cfg.getInt("hider.cave-visible-distance", 48));
     this.caveFillBudget           = Math.max(4096, cfg.getInt("hider.cave-fill-budget", 80000));
+    this.chunkRevealRadius        = Math.max(0, Math.min(4, cfg.getInt("hider.chunk-reveal-radius", 1)));
 
     this.spawnerMaskAboveY = cfg.getInt("hider.spawner-mask-above-y", 120);
     this.spawnerRevealDistance = Math.max(1, cfg.getInt("hider.spawner-reveal-distance", 20));
@@ -373,15 +375,21 @@ public class RevealManager {
   }
 
   private void revealCurrentChunk(Player player, int chunkX, int chunkZ, int playerY) {
-    if (playerY > floorY) {
+    if (playerY > floorY + 1) {
       return;
     }
     Set<Long> chunks = revealedChunks.computeIfAbsent(
         player.getUniqueId(), ignoredKey -> ConcurrentHashMap.newKeySet());
-    long key = chunkKey(chunkX, chunkZ);
-    if (chunks.add(key)) {
-      revealUndergroundChunks(player, chunkX, chunkZ);
-      notifyChunkRevealed(player, chunkX, chunkZ);
+    for (int offsetX = -chunkRevealRadius; offsetX <= chunkRevealRadius; offsetX++) {
+      for (int offsetZ = -chunkRevealRadius; offsetZ <= chunkRevealRadius; offsetZ++) {
+        int targetX = chunkX + offsetX;
+        int targetZ = chunkZ + offsetZ;
+        long key = chunkKey(targetX, targetZ);
+        if (chunks.add(key)) {
+          revealUndergroundChunks(player, targetX, targetZ);
+          notifyChunkRevealed(player, targetX, targetZ);
+        }
+      }
     }
   }
 
@@ -889,6 +897,9 @@ public class RevealManager {
   }
 
   public void revealAround(Player player, int centerX, int centerZ, int radius) {
+    Location location = player.getLocation();
+    revealCurrentChunk(player, location.getBlockX() >> 4, location.getBlockZ() >> 4,
+        location.getBlockY());
     refreshVisibleCave(player);
   }
 

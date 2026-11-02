@@ -87,11 +87,11 @@ AIR until the viewer is within render distance.
 **Sound & particle dampers:** Certain sounds/particles that leak hidden chunk data are
 suppressed or re-spatialised.
 
-**Cave volume reveal:** The chunk you are physically in is fully revealed below the floor
-so mining and base finding work normally. Other chunks use a bounded cave-volume fill and
-surface detection, so caves behind walls or outside the radius stay masked. The visible
-layer above the floor is included, and revealed cave and barrier blocks stay visible after
-returning above the floor until their chunk unloads.
+**Cave volume reveal:** The chunk you are in and the surrounding chunk area are fully
+revealed below the floor so mining and base finding work normally. Other chunks use a
+bounded cave-volume fill and surface detection, so caves behind walls or outside the radius
+stay masked. The visible layer above the floor is included, and revealed cave and barrier
+blocks stay visible after returning above the floor until their chunk unloads.
 
 **Salt rotation:** Noise pattern is salted per-player and rotates periodically (default
 12,000 ticks). Prevents clients from building a static map of the fake floor.
