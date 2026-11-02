@@ -79,7 +79,6 @@ public class RevealManager {
   private final boolean    verbose;
   private final int        floodThrottleTicks;
   private final int        floodReuseTicks;
-  private final int        caveProbeRange;
   private final int        entityScanChunkRadius;
   private final int        extraRevealRadius;
   private final int        recomputeMinTicks;
@@ -148,7 +147,6 @@ public class RevealManager {
     this.verbose      = cfg.getBoolean("hider.verbose-logging", false);
     this.floodThrottleTicks   = cfg.getInt("hider.flood-fill-throttle-ticks", 10);
     this.floodReuseTicks      = Math.max(20, cfg.getInt("hider.flood-fill-reuse-ticks", 80));
-    this.caveProbeRange       = Math.max(0, cfg.getInt("hider.cave-probe-range", 24));
     this.entityScanChunkRadius = cfg.getInt("hider.entity-scan-chunk-radius", 8);
 
     LogData.get().info("[hider] up; floor=" + floorY
@@ -199,6 +197,9 @@ public class RevealManager {
   public static int unpackY(long p) { return (int) (p & 0xFFFL) - (1 << 11); }
 
   public boolean isChunkRevealed(Player player, int chunkX, int chunkZ) {
+    if (player.getLocation().getBlockY() > floorY) {
+      return false;
+    }
     Set<Long> set = revealedChunks.get(player.getUniqueId());
     return set != null && set.contains(chunkKey(chunkX, chunkZ));
   }
@@ -280,13 +281,19 @@ public class RevealManager {
     Set<Long> forced = revealedGeodeChunks.get(player.getUniqueId());
     if (forced != null && forced.contains(chunkKeyValue)) return true;
     Location loc = player.getLocation();
-    int px = loc.getBlockX(), playerY = loc.getBlockY(), pz = loc.getBlockZ();
-    long rsq = geodeRadiusSq;
+    int playerX = loc.getBlockX();
+    int playerY = loc.getBlockY();
+    int playerZ = loc.getBlockZ();
+    long radiusSq = geodeRadiusSq;
     for (long packed : positions) {
-      long dx = unpackX(packed) - px;
-      long dy = unpackY(packed) - playerY;
-      long dz = unpackZ(packed) - pz;
-      if (dx * dx + dy * dy + dz * dz <= rsq) return true;
+      int geodeY = unpackY(packed);
+      if (geodeY < floorY && playerY > floorY) {
+        continue;
+      }
+      long dx = unpackX(packed) - playerX;
+      long dy = geodeY - playerY;
+      long dz = unpackZ(packed) - playerZ;
+      if (dx * dx + dy * dy + dz * dz <= radiusSq) return true;
     }
     return false;
   }
@@ -345,14 +352,6 @@ public class RevealManager {
       int floodStartY = Math.min(playerY, floorY - 1);
       desiredChunks.addAll(getCachedCaveFlood(playerId, player.getWorld(),
           playerChunkX << 4, floodStartY, playerChunkZ << 4));
-    } else {
-      Location ploc = player.getLocation();
-      int seamY = findCaveSeam(player.getWorld(), ploc.getBlockX(), ploc.getBlockZ());
-      if (seamY != Integer.MIN_VALUE) {
-        addChunkSquare(desiredChunks, playerChunkX, playerChunkZ, movementRadius);
-        desiredChunks.addAll(getCachedCaveFlood(playerId, player.getWorld(),
-            ploc.getBlockX(), seamY, ploc.getBlockZ()));
-      }
     }
 
     if (desiredChunks.isEmpty()) {
@@ -418,8 +417,8 @@ public class RevealManager {
       return;
     }
     Set<Long> keep = new HashSet<>(desiredChunks);
-    /* Sticky chunks apply only while the player is inside the masked region. */
-    if (player.getLocation().getBlockY() < upperY) {
+    /* Sticky chunks apply only while the player is below the floor. */
+    if (player.getLocation().getBlockY() < floorY) {
       addChunkSquare(keep, playerChunkX, playerChunkZ, stickyRadius);
     }
     int budget = player.getLocation().getBlockY() >= upperY
@@ -843,6 +842,9 @@ public class RevealManager {
   }
 
   public void revealAround(Player player, int centerX, int centerZ, int radius) {
+    if (player.getLocation().getBlockY() > floorY) {
+      return;
+    }
     Set<Long> set = revealedChunks.computeIfAbsent(
         player.getUniqueId(), ignoredKey -> ConcurrentHashMap.newKeySet());
     for (int dx = -radius; dx <= radius; dx++) {
@@ -904,17 +906,6 @@ public class RevealManager {
       LogData.get().info("[hider] flood ran out of budget at " + chunks.size() + " chunks");
     }
     return chunks;
-  }
-
-  private int findCaveSeam(World world, int blockX, int blockZ) {
-    int fromY = Math.max(worldMinY, world.getMinHeight());
-    int toY = Math.min(floorY - 1, world.getMaxHeight() - 1);
-    for (int y = toY; y >= fromY; y--) {
-      if (isPassableBlock(world.getType(blockX, y, blockZ))) {
-        return y;
-      }
-    }
-    return Integer.MIN_VALUE;
   }
 
   private static long voxelKey(int x, int y, int z) {
@@ -1069,8 +1060,12 @@ public class RevealManager {
       Bukkit.getScheduler().runTaskLater(plugin, () -> {
         Player player = Bukkit.getPlayer(playerId);
         if (player == null || !player.isOnline()) return;
-        if (alreadyRevealed) revealUndergroundChunks(player, fromChunkX, fromChunkZ);
-        if (alreadyUpper)    sendBarrierBand(player, fromChunkX, fromChunkZ, false);
+        if (alreadyRevealed && player.getLocation().getBlockY() <= floorY) {
+          revealUndergroundChunks(player, fromChunkX, fromChunkZ);
+        }
+        if (alreadyUpper && player.getLocation().getBlockY() < upperY + 2) {
+          sendBarrierBand(player, fromChunkX, fromChunkZ, false);
+        }
         refreshGeodeVisibility(player);
         if (ghostBlockManager != null) {
           ghostBlockManager.resendForChunk(playerId, player, fromChunkX, fromChunkZ);
@@ -1132,6 +1127,9 @@ public class RevealManager {
   }
 
   private boolean isRevealThrottled(UUID playerId, int playerChunkX, int playerChunkZ, int playerY) {
+    if (playerY > floorY) {
+      return false;
+    }
     long now = serverTick();
     long[] stamp = lastRevealRefresh.computeIfAbsent(playerId, ignoredKey -> new long[4]);
 

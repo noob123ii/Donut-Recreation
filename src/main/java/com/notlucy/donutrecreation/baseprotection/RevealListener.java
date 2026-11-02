@@ -104,7 +104,8 @@ public final class RevealListener implements Listener {
     int fromChunkX = from.getBlockX() >> 4, fromChunkZ = from.getBlockZ() >> 4;
     int toChunkX = destination.getBlockX()   >> 4, toChunkZ = destination.getBlockZ()   >> 4;
     boolean crossedChunk = fromChunkX != toChunkX || fromChunkZ != toChunkZ;
-    boolean crossedFloor = (from.getY() < revealManager.hideBelowY()) != (destination.getY() < revealManager.hideBelowY());
+    int floorY = revealManager.hideBelowY();
+    boolean crossedFloor = (from.getY() <= floorY) != (destination.getY() <= floorY);
     int upperY = revealManager.upperBarrierY();
     boolean crossedUpper   = (from.getY() < upperY) != (destination.getY() < upperY);
     boolean approachingUpper = !crossedUpper && destination.getY() >= upperY
