@@ -198,9 +198,6 @@ public class RevealManager {
   public static int unpackY(long p) { return (int) (p & 0xFFFL) - (1 << 11); }
 
   public boolean isChunkRevealed(Player player, int chunkX, int chunkZ) {
-    if (player.getLocation().getBlockY() > floorY) {
-      return false;
-    }
     Set<Long> set = revealedChunks.get(player.getUniqueId());
     return set != null && set.contains(chunkKey(chunkX, chunkZ));
   }
@@ -276,6 +273,7 @@ public class RevealManager {
 
   public boolean isGeodeVisibleTo(Player player, int chunkX, int chunkZ) {
     if (!geodeOn) return true;
+    if (isChunkRevealed(player, chunkX, chunkZ)) return true;
     Set<Long> positions = geodePositionsByChunk.get(chunkKey(chunkX, chunkZ));
     if (positions == null || positions.isEmpty()) return true;
     long chunkKeyValue = chunkKey(chunkX, chunkZ);
@@ -409,22 +407,21 @@ public class RevealManager {
 
   /**
    * Masks chunks that were revealed earlier but are no longer part of the
-   * viewer's desired reveal area. Without this, a player could reveal a base
-   * underground and keep it visible after flying back to the surface.
+   * viewer's desired reveal area while still underground. Chunks revealed
+   * before the player returns above the floor stay visible until they unload.
    */
   private void hideStaleRevealed(Player player, Set<Long> currentlyRevealed, Set<Long> desiredChunks,
       int playerChunkX, int playerChunkZ) {
     if (currentlyRevealed.isEmpty()) {
       return;
     }
-    Set<Long> keep = new HashSet<>(desiredChunks);
     int playerY = player.getLocation().getBlockY();
-    /* Sticky chunks apply only while the player is below the floor. */
-    if (playerY < floorY) {
-      addChunkSquare(keep, playerChunkX, playerChunkZ, stickyRadius);
+    if (playerY > floorY) {
+      return;
     }
-    int budget = playerY >= floorY
-        ? 256 : maxHidePerRecompute;
+    Set<Long> keep = new HashSet<>(desiredChunks);
+    addChunkSquare(keep, playerChunkX, playerChunkZ, stickyRadius);
+    int budget = maxHidePerRecompute;
     for (long key : new HashSet<>(currentlyRevealed)) {
       if (keep.contains(key)) {
         continue;
@@ -869,7 +866,7 @@ public class RevealManager {
 
     LongOpenHashSet visited = new LongOpenHashSet(Math.max(64, floodBudget));
     LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
-    long startKey = voxelKey(startX, startY, startZ);
+    long startKey = packPos(startX, startY, startZ);
     queue.enqueue(startKey);
     visited.add(startKey);
     int budget = floodBudget;
@@ -877,9 +874,9 @@ public class RevealManager {
 
     while (!queue.isEmpty() && budget-- > 0) {
       long packed = queue.dequeueLong();
-      int x = (int) (packed >> 38);
-      int z = (int) ((packed << 26) >> 26);
-      int y = (int) ((packed << 52) >> 52);
+      int x = unpackX(packed);
+      int y = unpackY(packed);
+      int z = unpackZ(packed);
       chunks.add(chunkKey(x >> 4, z >> 4));
       for (int direction = 0; direction < 6; direction++) {
         int neighborX = x + NX[direction];
@@ -889,7 +886,7 @@ public class RevealManager {
         int deltaX = neighborX - startX;
         int deltaZ = neighborZ - startZ;
         if (deltaX * deltaX + deltaZ * deltaZ > radiusSq) continue;
-        long neighborKey = voxelKey(neighborX, neighborY, neighborZ);
+        long neighborKey = packPos(neighborX, neighborY, neighborZ);
         if (!visited.add(neighborKey)) continue;
         if (!world.isChunkLoaded(neighborX >> 4, neighborZ >> 4)) continue;
         if (isPassableBlock(world.getType(neighborX, neighborY, neighborZ))) {
@@ -901,10 +898,6 @@ public class RevealManager {
       LogData.get().info("[hider] flood ran out of budget at " + chunks.size() + " chunks");
     }
     return chunks;
-  }
-
-  private static long voxelKey(int x, int y, int z) {
-    return ((long) (x & 0x3FFFFFF) << 38) | ((long) (z & 0x3FFFFFF) << 12) | (y & 0xFFF);
   }
 
   private boolean raycastTo(Player player, int chunkX, int chunkZ, double targetY, boolean verboseLos) {
@@ -1055,10 +1048,10 @@ public class RevealManager {
       Bukkit.getScheduler().runTaskLater(plugin, () -> {
         Player player = Bukkit.getPlayer(playerId);
         if (player == null || !player.isOnline()) return;
-        if (alreadyRevealed && player.getLocation().getBlockY() <= floorY) {
+        if (alreadyRevealed) {
           revealUndergroundChunks(player, fromChunkX, fromChunkZ);
         }
-        if (alreadyUpper && player.getLocation().getBlockY() < upperY + 2) {
+        if (alreadyUpper) {
           sendBarrierBand(player, fromChunkX, fromChunkZ, false);
         }
         refreshGeodeVisibility(player);
@@ -1071,8 +1064,19 @@ public class RevealManager {
 
   public void recordChunkUnloaded(UUID playerId, int chunkX, int chunkZ) {
     if (playerId == null) return;
-    Set<Long> set = deliveredChunkKeys.get(playerId);
-    if (set != null) set.remove(chunkKey(chunkX, chunkZ));
+    long chunkKeyValue = chunkKey(chunkX, chunkZ);
+    Set<Long> delivered = deliveredChunkKeys.get(playerId);
+    if (delivered != null) {
+      delivered.remove(chunkKeyValue);
+    }
+    Set<Long> revealed = revealedChunks.get(playerId);
+    if (revealed != null) {
+      revealed.remove(chunkKeyValue);
+    }
+    Set<Long> barrier = revealedBarrierChunks.get(playerId);
+    if (barrier != null) {
+      barrier.remove(chunkKeyValue);
+    }
   }
 
   public boolean wasChunkDeliveredTo(UUID playerId, int chunkX, int chunkZ) {
@@ -1092,21 +1096,7 @@ public class RevealManager {
 
   public void rotatePlayerSalt(UUID playerId) {
     if (playerId == null) return;
-    Set<Long> oldRevealed = revealedChunks.remove(playerId);
     playerSalts.put(playerId, ThreadLocalRandom.current().nextInt());
-    if (oldRevealed == null || oldRevealed.isEmpty()) {
-      return;
-    }
-    Player player = Bukkit.getPlayer(playerId);
-    if (player == null || !player.isOnline()) {
-      oldRevealed.clear();
-      return;
-    }
-    /* Re-mask chunks revealed under the previous salt before using the new one. */
-    for (long key : oldRevealed) {
-      maskUndergroundChunks(player, keyX(key), keyZ(key));
-    }
-    oldRevealed.clear();
   }
 
   public int extraRevealJitter(UUID playerId) {
@@ -1122,9 +1112,6 @@ public class RevealManager {
   }
 
   private boolean isRevealThrottled(UUID playerId, int playerChunkX, int playerChunkZ, int playerY) {
-    if (playerY > floorY) {
-      return false;
-    }
     long now = serverTick();
     long[] stamp = lastRevealRefresh.computeIfAbsent(playerId, ignoredKey -> new long[4]);
 
@@ -1200,6 +1187,18 @@ public class RevealManager {
       }
     }
     for (Map.Entry<UUID, Set<Long>> entry : revealedGeodeChunks.entrySet()) {
+      Player player = Bukkit.getPlayer(entry.getKey());
+      if (player != null && player.getWorld().equals(world)) {
+        entry.getValue().remove(chunkKeyValue);
+      }
+    }
+    for (Map.Entry<UUID, Set<Long>> entry : revealedChunks.entrySet()) {
+      Player player = Bukkit.getPlayer(entry.getKey());
+      if (player != null && player.getWorld().equals(world)) {
+        entry.getValue().remove(chunkKeyValue);
+      }
+    }
+    for (Map.Entry<UUID, Set<Long>> entry : revealedBarrierChunks.entrySet()) {
       Player player = Bukkit.getPlayer(entry.getKey());
       if (player != null && player.getWorld().equals(world)) {
         entry.getValue().remove(chunkKeyValue);
