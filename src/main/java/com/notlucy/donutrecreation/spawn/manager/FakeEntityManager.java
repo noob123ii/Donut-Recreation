@@ -131,7 +131,7 @@ public final class FakeEntityManager {
       ItemStack item = buildPacketItem(itemStr);
       if (item != null && item.getType() != ItemTypes.AIR) {
         List<EntityData<?>> data = new ArrayList<>(1);
-        data.add(new EntityData<>(8, EntityDataTypes.ITEMSTACK, item));
+        data.add(new EntityData<>(9, EntityDataTypes.ITEMSTACK, item));
         WrapperPlayServerEntityMetadata meta =
             new WrapperPlayServerEntityMetadata(entityId, data);
         PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, meta);
@@ -165,10 +165,9 @@ public final class FakeEntityManager {
     }
 
     try {
-      List<EntityData<?>> data = new ArrayList<>(3);
+      List<EntityData<?>> data = new ArrayList<>(2);
       data.add(new EntityData<>(0, EntityDataTypes.BYTE, (byte) 0x20));
-      data.add(new EntityData<>(5, EntityDataTypes.BYTE, (byte) 0x10));
-      data.add(new EntityData<>(6, EntityDataTypes.BYTE, (byte) 0x01));
+      data.add(new EntityData<>(8, EntityDataTypes.BYTE, (byte) 0x0C));
       WrapperPlayServerEntityMetadata meta =
           new WrapperPlayServerEntityMetadata(entityId, data);
       PacketEvents.getAPI().getPlayerManager().sendPacket(viewer, meta);
