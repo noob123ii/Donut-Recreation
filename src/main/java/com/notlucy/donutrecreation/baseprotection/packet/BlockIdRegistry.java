@@ -219,33 +219,16 @@ public final class BlockIdRegistry {
   }
 
   public int floorIdAt(int salt, int x, int y, int z) {
-    int[] palette = floorPalette;
-    if (palette == null || palette.length == 0) {
-      return floorId;
-    }
-    int hash = scramble(x ^ salt, y, z ^ salt);
-    return palette[Math.floorMod(hash, palette.length)];
+    return floorId;
   }
 
   public int[] floorPalette() {
     return floorPalette == null ? new int[]{floorId} : floorPalette.clone();
   }
 
-  private static int scramble(int x, int y, int z) {
-    int hash = x * 0x9E3779B1;
-    hash ^= Integer.rotateLeft(z * 0x85EBCA77, 13);
-    hash ^= Integer.rotateLeft(y * 0xC2B2AE3D, 17);
-    hash ^= (hash >>> 16);
-    return hash;
-  }
-
   private static int[] buildFloorPalette(ClientVersion version) {
     StateType[] candidates = {
-        StateTypes.DEEPSLATE,
-        StateTypes.TUFF,
-        StateTypes.STONE,
-        StateTypes.ANDESITE,
-        StateTypes.GRAVEL
+        StateTypes.DEEPSLATE
     };
     int[] tmp = new int[candidates.length];
     int written = 0;

@@ -1,7 +1,5 @@
 package com.notlucy.donutrecreation.baseprotection;
 
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -11,6 +9,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ThreadLocalRandom;
+
+import it.unimi.dsi.fastutil.longs.LongArrayFIFOQueue;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
@@ -111,11 +112,7 @@ public class RevealManager {
 
     this.stickyRadius = cfg.getInt("hider.sticky-radius", 10);
     this.maskPalette = new BlockData[]{
-        Material.DEEPSLATE.createBlockData(),
-        Material.TUFF.createBlockData(),
-        Material.STONE.createBlockData(),
-        Material.ANDESITE.createBlockData(),
-        Material.GRAVEL.createBlockData()
+        Material.DEEPSLATE.createBlockData()
     };
 
     this.extraRevealRadius        = Math.max(0, cfg.getInt("hider.reveal-edge-extra-radius", 1));
@@ -143,7 +140,7 @@ public class RevealManager {
     this.geodeRadiusSq = (long) geodeRadius * geodeRadius;
     this.fakeGeodeAmethystPerChunk = Math.max(1,
         cfg.getInt("hider.fake-geode-amethyst-per-chunk", 24));
-    this.aboveFloorAmethystMask = Material.STONE.createBlockData();
+    this.aboveFloorAmethystMask = Material.DEEPSLATE.createBlockData();
     this.verbose      = cfg.getBoolean("hider.verbose-logging", false);
     this.floodThrottleTicks   = cfg.getInt("hider.flood-fill-throttle-ticks", 10);
     this.floodReuseTicks      = Math.max(20, cfg.getInt("hider.flood-fill-reuse-ticks", 80));
@@ -480,12 +477,10 @@ public class RevealManager {
     int fromY = floorY, toY = upperY;
     if (fromY >= toY) return;
 
-    ChunkSnapshot snap = mask ? null : world.getChunkAt(chunkX, chunkZ).getChunkSnapshot();
+    ChunkSnapshot snapshot = mask ? null : world.getChunkAt(chunkX, chunkZ).getChunkSnapshot();
     int baseX    = chunkX << 4;
     int baseZ    = chunkZ << 4;
-    BlockData[] palette  = maskPalette;
-    int paletteLen = palette.length;
-    int salt = getPlayerSalt(player.getUniqueId());
+    BlockData maskBlock = maskPalette[0];
 
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
@@ -497,12 +492,10 @@ public class RevealManager {
         for (int y = fromY; y < toY; y++) {
           BlockData data;
           if (mask) {
-            data = palette[Math.floorMod(noiseHash(worldX ^ salt, y, worldZ ^ salt), paletteLen)];
+            data = maskBlock;
           } else {
-            data = snap.getBlockData(x, y, z);
-            BlockData fake = palette[
-                Math.floorMod(noiseHash(worldX ^ salt, y, worldZ ^ salt), paletteLen)];
-            if (data.equals(fake)) {
+            data = snapshot.getBlockData(x, y, z);
+            if (data.equals(maskBlock)) {
               continue;
             }
           }
@@ -672,8 +665,7 @@ public class RevealManager {
     if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) return;
     World world = player.getWorld();
     Map<Location, BlockData> changes = new HashMap<>(positions.size());
-    BlockData[] palette = maskPalette;
-    int salt = getPlayerSalt(player.getUniqueId());
+    BlockData belowMask = maskPalette[0];
     BlockData aboveMask = aboveFloorAmethystMask;
     for (long packed : positions) {
       int x = unpackX(packed);
@@ -683,8 +675,6 @@ public class RevealManager {
           && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
         continue;
       }
-      BlockData belowMask = palette[
-          Math.floorMod(noiseHash(x ^ salt, y, z ^ salt), palette.length)];
       changes.put(new Location(world, x, y, z),
           (y < floorY) ? belowMask : aboveMask);
     }
@@ -782,9 +772,7 @@ public class RevealManager {
     int maxY  = floorY;
     int baseX = chunkX << 4;
     int baseZ = chunkZ << 4;
-    BlockData[] palette = maskPalette;
-    int paletteLen = palette.length;
-    int salt = getPlayerSalt(player.getUniqueId());
+    BlockData maskBlock = maskPalette[0];
     UUID playerId = player.getUniqueId();
     boolean checkGhosts = hasAnyGhostBlocks(playerId);
 
@@ -800,9 +788,7 @@ public class RevealManager {
             continue;
           }
           BlockData real = snapshot.getBlockData(x, y, z);
-          BlockData fake = palette[
-              Math.floorMod(noiseHash(worldX ^ salt, y, worldZ ^ salt), paletteLen)];
-          if (real.equals(fake)) {
+          if (real.equals(maskBlock)) {
             continue;
           }
           batch.put(new Location(world, worldX, y, worldZ), real);
@@ -822,9 +808,7 @@ public class RevealManager {
     int maxY  = floorY;
     int baseX = chunkX << 4;
     int baseZ = chunkZ << 4;
-    BlockData[] palette   = maskPalette;
-    int paletteLen = palette.length;
-    int salt = getPlayerSalt(player.getUniqueId());
+    BlockData maskBlock = maskPalette[0];
     UUID playerId = player.getUniqueId();
     boolean checkGhosts = hasAnyGhostBlocks(playerId);
 
@@ -839,8 +823,7 @@ public class RevealManager {
           if (checkGhosts && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
             continue;
           }
-          int idx = Math.floorMod(noiseHash(worldX ^ salt, y, worldZ ^ salt), paletteLen);
-          batch.put(new Location(world, worldX, y, worldZ), palette[idx]);
+          batch.put(new Location(world, worldX, y, worldZ), maskBlock);
           if (++n >= batchSize) { player.sendMultiBlockChange(batch); batch.clear(); n = 0; }
         }
       }
@@ -878,34 +861,39 @@ public class RevealManager {
   }
 
   private Set<Long> floodFillCave(World world, int startX, int startY, int startZ) {
-    Set<Long> chunks = new HashSet<>();
+    LongOpenHashSet chunks = new LongOpenHashSet();
     int minY = Math.max(worldMinY, world.getMinHeight());
     int maxY = floorY - 1;
     if (startY < minY) startY = minY;
     if (startY > maxY) startY = maxY;
 
-    Set<Long> visited = new HashSet<>();
-    Deque<Long> queue = new ArrayDeque<>();
-    queue.add(voxelKey(startX, startY, startZ));
-    visited.add(voxelKey(startX, startY, startZ));
+    LongOpenHashSet visited = new LongOpenHashSet(Math.max(64, floodBudget));
+    LongArrayFIFOQueue queue = new LongArrayFIFOQueue();
+    long startKey = voxelKey(startX, startY, startZ);
+    queue.enqueue(startKey);
+    visited.add(startKey);
     int budget = floodBudget;
-    int rsq = floodRadiusSq;
+    int radiusSq = floodRadiusSq;
 
     while (!queue.isEmpty() && budget-- > 0) {
-      long packed = queue.poll();
+      long packed = queue.dequeueLong();
       int x = (int) (packed >> 38);
       int z = (int) ((packed << 26) >> 26);
       int y = (int) ((packed << 52) >> 52);
       chunks.add(chunkKey(x >> 4, z >> 4));
-      for (int n = 0; n < 6; n++) {
-        int neighborX = x + NX[n], neighborY = y + NY[n], neighborZ = z + NZ[n];
+      for (int direction = 0; direction < 6; direction++) {
+        int neighborX = x + NX[direction];
+        int neighborY = y + NY[direction];
+        int neighborZ = z + NZ[direction];
         if (neighborY < minY || neighborY > maxY) continue;
-        int dxr = neighborX - startX, dzr = neighborZ - startZ;
-        if (dxr * dxr + dzr * dzr > rsq) continue;
-        if (!visited.add(voxelKey(neighborX, neighborY, neighborZ))) continue;
+        int deltaX = neighborX - startX;
+        int deltaZ = neighborZ - startZ;
+        if (deltaX * deltaX + deltaZ * deltaZ > radiusSq) continue;
+        long neighborKey = voxelKey(neighborX, neighborY, neighborZ);
+        if (!visited.add(neighborKey)) continue;
         if (!world.isChunkLoaded(neighborX >> 4, neighborZ >> 4)) continue;
         if (isPassableBlock(world.getType(neighborX, neighborY, neighborZ))) {
-          queue.add(voxelKey(neighborX, neighborY, neighborZ));
+          queue.enqueue(neighborKey);
         }
       }
     }
@@ -1176,7 +1164,7 @@ public class RevealManager {
       Long last = lastCaveFloodTick.get(playerId);
       Set<Long> cached = cachedCaveFlood.get(playerId);
       if (last != null && now - last < floodReuseTicks && cached != null) {
-        return new HashSet<>(cached);
+        return cached;
       }
     }
     Set<Long> fresh = floodFillCave(world, x, y, z);
@@ -1194,14 +1182,6 @@ public class RevealManager {
       catch (NoSuchMethodError ignored) { currentTickSupported = false; }
     }
     return System.nanoTime() / 50_000_000L;
-  }
-
-  private static int noiseHash(int x, int y, int z) {
-    int h = x * 0x9E3779B1;
-    h ^= Integer.rotateLeft(z * 0x85EBCA77, 13);
-    h ^= Integer.rotateLeft(y * 0xC2B2AE3D, 17);
-    h ^= (h >>> 16);
-    return h;
   }
 
   public void handleChunkUnload(int chunkX, int chunkZ) {

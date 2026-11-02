@@ -162,18 +162,29 @@ public final class SpawnCommand implements CommandExecutor, TabCompleter {
     Location origin = player.getLocation().getBlock().getLocation();
     List<GhostBlockManager.GhostBlock> ghostList =
         template.toGhostBlocks(origin, player.getLocation().getYaw());
+    List<StashManager.StashEntityPlacement> entityPlacements =
+        template.toEntityPlacements(origin, player.getLocation().getYaw());
     long groupId = ghosts.broadcast(ghostList, FIVE_MIN_TICKS, STASH_BROADCAST_RADIUS,
-        () -> fakeEntities.despawnAllFor(player));
+        () -> {
+          for (Player viewer : Bukkit.getOnlinePlayers()) {
+            fakeEntities.despawnAllFor(viewer);
+          }
+        });
     int viewerCount = 0;
     for (var onlinePlayer : Bukkit.getOnlinePlayers()) {
       if (!onlinePlayer.getWorld().equals(origin.getWorld())) continue;
-      if (onlinePlayer.getLocation().distanceSquared(origin) <= (double) STASH_BROADCAST_RADIUS * STASH_BROADCAST_RADIUS) {
+      if (onlinePlayer.getLocation().distanceSquared(origin)
+          <= (double) STASH_BROADCAST_RADIUS * STASH_BROADCAST_RADIUS) {
         viewerCount++;
+        for (StashManager.StashEntityPlacement placement : entityPlacements) {
+          fakeEntities.spawnStashEntity(onlinePlayer, placement, FIVE_MIN_TICKS);
+        }
       }
     }
     player.sendMessage(plugin.color(
         "&aFake stash '&f" + template.name + "&a' spawned (&f"
-            + ghostList.size() + "&a blocks, group #" + groupId
+            + ghostList.size() + "&a blocks, &f" + entityPlacements.size()
+            + "&a entities, group #" + groupId
             + "&a, visible to &f" + viewerCount + " &aplayers, reverts in 5min)."));
   }
 

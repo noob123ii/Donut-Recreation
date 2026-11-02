@@ -51,6 +51,24 @@ public final class FakeEntityManager {
         EntityTypes.GLOW_ITEM_FRAME, ttlTicks);
   }
 
+  public void spawnStashEntity(Player viewer, StashManager.StashEntityPlacement placement,
+      long ttlTicks) {
+    if (placement == null || placement.type() == null) {
+      return;
+    }
+    String type = placement.type().toLowerCase(java.util.Locale.ROOT);
+    switch (type) {
+      case "item_frame" ->
+          spawnItemFrame(viewer, placement.location(), placement.item(), placement.facing(), ttlTicks);
+      case "glow_item_frame" ->
+          spawnGlowItemFrame(viewer, placement.location(), placement.item(), placement.facing(), ttlTicks);
+      case "armor_stand" ->
+          spawnArmorStand(viewer, placement.location(), placement.yaw(), ttlTicks);
+      default -> {
+      }
+    }
+  }
+
   @SuppressWarnings("checkstyle:MagicNumber")
   private void spawnHangingEntity(Player viewer, Location blockLoc, String itemStr,
                                     int facing,

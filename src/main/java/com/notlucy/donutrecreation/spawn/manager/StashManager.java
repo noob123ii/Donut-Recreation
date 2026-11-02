@@ -355,6 +355,31 @@ public final class StashManager {
       return list;
     }
 
+    public List<StashEntityPlacement> toEntityPlacements(Location origin) {
+      return toEntityPlacements(origin, 0f);
+    }
+
+    public List<StashEntityPlacement> toEntityPlacements(Location origin, float yaw) {
+      World world = origin.getWorld();
+      int ox = origin.getBlockX();
+      int oy = origin.getBlockY();
+      int oz = origin.getBlockZ();
+      int steps = yawToSteps(yaw);
+      List<StashEntityPlacement> list = new ArrayList<>(entities.size());
+      for (StashEntity entity : entities) {
+        int[] rot = rotateOffset(entity.x, entity.z, steps);
+        Location location = new Location(world,
+            ox + rot[0] + 0.5, oy + entity.y, oz + rot[1] + 0.5);
+        int facing = entity.facing;
+        if (facing >= 0 && facing < 4) {
+          facing = (facing + steps) & 3;
+        }
+        list.add(new StashEntityPlacement(entity.type, location, facing,
+            entity.item, entity.rotationYaw + steps * 90f));
+      }
+      return list;
+    }
+
     private static int[] rotateOffset(int x, int z, int steps) {
       return switch (steps & 3) {
         case 1 -> new int[]{-z, x};
@@ -443,6 +468,10 @@ public final class StashManager {
       }
       return data;
     }
+  }
+
+  public record StashEntityPlacement(
+      String type, Location location, int facing, String item, float yaw) {
   }
 
   @SuppressWarnings("checkstyle:MemberName")

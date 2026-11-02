@@ -113,6 +113,11 @@ public final class McFunctionConverter {
               entities.add(entry.entity());
             }
           }
+        } else if (line.startsWith("summon ")) {
+          ParsedEntry entry = parseSummon(line);
+          if (entry != null && entry.entity() != null) {
+            entities.add(entry.entity());
+          }
         }
       }
     }
@@ -133,7 +138,7 @@ public final class McFunctionConverter {
   }
 
   private static ParsedEntry parseSetblock(String line) {
-    String[] parts = line.split("\\line+");
+    String[] parts = line.split("\\s+");
     if (parts.length < 5) {
       return null;
     }
@@ -172,6 +177,106 @@ public final class McFunctionConverter {
       return null;
     }
     return new ParsedEntry(new StashManager.StashBlock(x, y, z, data), null);
+  }
+
+  private static ParsedEntry parseSummon(String line) {
+    String[] parts = line.split("\\s+");
+    if (parts.length < 5) {
+      return null;
+    }
+    String type = parts[1].toLowerCase(Locale.ROOT);
+    if (type.startsWith("minecraft:")) {
+      type = type.substring("minecraft:".length());
+    }
+    if (!type.equals("item_frame") && !type.equals("glow_item_frame")
+        && !type.equals("armor_stand")) {
+      return null;
+    }
+    int x = parseRelCoord(parts[2]);
+    int y = parseRelCoord(parts[3]);
+    int z = parseRelCoord(parts[4]);
+    int nbtStart = line.indexOf('{');
+    String nbt = nbtStart >= 0 ? line.substring(nbtStart) : null;
+    int facing = extractIntStateIgnoreCase(nbt, "Facing");
+    String item = extractItemId(nbt);
+    float yaw = extractRotationYaw(nbt);
+    return new ParsedEntry(null,
+        new StashManager.StashEntity(type, x, y, z, facing, item, yaw));
+  }
+
+  private static int extractIntStateIgnoreCase(String states, String key) {
+    if (states == null) {
+      return -1;
+    }
+    int idx = states.toLowerCase(Locale.ROOT).indexOf(key.toLowerCase(Locale.ROOT) + ":");
+    if (idx < 0) {
+      return -1;
+    }
+    int start = states.indexOf(':', idx) + 1;
+    int end = start;
+    while (end < states.length() && (states.charAt(end) == '-'
+        || Character.isDigit(states.charAt(end)))) {
+      end++;
+    }
+    try {
+      return Integer.parseInt(states.substring(start, end));
+    } catch (NumberFormatException error) {
+      return -1;
+    }
+  }
+
+  private static String extractItemId(String nbt) {
+    if (nbt == null) {
+      return null;
+    }
+    int itemIndex = nbt.indexOf("Item:");
+    if (itemIndex < 0) {
+      itemIndex = nbt.indexOf("item:");
+    }
+    if (itemIndex < 0) {
+      return null;
+    }
+    int idIndex = nbt.indexOf("id:", itemIndex);
+    if (idIndex < 0) {
+      return null;
+    }
+    int quote = nbt.indexOf('"', idIndex);
+    if (quote < 0) {
+      return null;
+    }
+    int end = nbt.indexOf('"', quote + 1);
+    if (end < 0) {
+      return null;
+    }
+    String item = nbt.substring(quote + 1, end);
+    return item.startsWith("minecraft:") ? item.substring("minecraft:".length()) : item;
+  }
+
+  private static float extractRotationYaw(String nbt) {
+    if (nbt == null) {
+      return 0f;
+    }
+    int rotation = nbt.indexOf("Rotation:");
+    if (rotation < 0) {
+      return 0f;
+    }
+    int start = nbt.indexOf('[', rotation);
+    if (start < 0) {
+      return 0f;
+    }
+    int end = start + 1;
+    while (end < nbt.length() && nbt.charAt(end) != ',' && nbt.charAt(end) != ']') {
+      end++;
+    }
+    String value = nbt.substring(start + 1, end)
+        .replace("f", "")
+        .replace("d", "")
+        .trim();
+    try {
+      return Float.parseFloat(value);
+    } catch (NumberFormatException error) {
+      return 0f;
+    }
   }
 
   private static StashManager.StashEntity parseEntity(String type,

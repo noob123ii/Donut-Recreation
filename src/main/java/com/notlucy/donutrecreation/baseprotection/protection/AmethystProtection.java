@@ -112,7 +112,7 @@ public final class AmethystProtection {
     syncCache(nowAmethyst, wasAmethyst, x, y, z);
 
     if ((nowAmethyst || wasAmethyst) && !revealManager.isGeodeVisibleTo(player, x >> 4, z >> 4)) {
-      int target = (y < revealManager.hideBelowY()) ? blockIds.floorId() : blockIds.stoneId();
+      int target = blockIds.floorId();
       wrapper.setBlockState(WrappedBlockState.getByGlobalId(target));
       return true;
     }
@@ -155,7 +155,7 @@ public final class AmethystProtection {
       syncCache(nowAmethyst, wasAmethyst, blockX, blockY, blockZ);
 
       if (!revealedHere && (nowAmethyst || wasAmethyst)) {
-        int target = (blockY < floorY) ? blockIds.floorId() : blockIds.stoneId();
+        int target = blockIds.floorId();
         enc.setBlockId(target);
         swaps++;
       }
@@ -296,7 +296,7 @@ public final class AmethystProtection {
       if (!blockIds.isAmethyst(section.getBlockId(localX, localY, localZ))) {
         continue;
       }
-      int target = (worldY < floorY) ? blockIds.floorId() : blockIds.stoneId();
+      int target = blockIds.floorId();
       section.set(localX, localY, localZ, target);
       swapped++;
     }
