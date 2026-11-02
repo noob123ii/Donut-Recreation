@@ -96,7 +96,7 @@ public final class BlockEntityDebugProtection {
         continue;
       }
       boolean regionVisible = y < floorY
-          ? revealManager.isChunkRevealed(player, chunkX, chunkZ)
+          ? revealManager.isCaveBlockVisible(player, t.getX(), y, t.getZ())
           : revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
       if (!regionVisible) {
         continue;

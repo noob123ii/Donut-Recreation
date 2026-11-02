@@ -50,6 +50,8 @@ public class RevealManager {
   private final ConcurrentLinkedDeque<Long>        geodeInsertionOrder = new ConcurrentLinkedDeque<>();
 
   private final ConcurrentMap<UUID, Set<Long>> deliveredChunkKeys = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, ConcurrentMap<Long, LongOpenHashSet>> visibleCaveBlocks =
+      new ConcurrentHashMap<>();
 
   private final ConcurrentMap<UUID, Long> surfacedSinceTick = new ConcurrentHashMap<>();
 
@@ -87,6 +89,9 @@ public class RevealManager {
   private final int        maxGeodeChunks;
   private final int        maxRevealPerRecompute;
   private final int        maxHidePerRecompute;
+  private final int        caveVisibleDistance;
+  private final int        caveRayYawSteps;
+  private final int        caveRayPitchSteps;
   private final BlockData[] maskPalette;
   private final int        spawnerMaskAboveY;
   private final int        spawnerRevealDistance;
@@ -121,6 +126,9 @@ public class RevealManager {
     this.maxGeodeChunks           = Math.max(256, cfg.getInt("hider.max-geode-chunks", 16384));
     this.maxRevealPerRecompute    = Math.max(1, cfg.getInt("hider.max-reveal-per-recompute", 64));
     this.maxHidePerRecompute      = Math.max(1, cfg.getInt("hider.max-hide-per-recompute", 16));
+    this.caveVisibleDistance      = Math.max(16, cfg.getInt("hider.cave-visible-distance", 64));
+    this.caveRayYawSteps          = Math.max(16, cfg.getInt("hider.cave-ray-yaw-steps", 64));
+    this.caveRayPitchSteps        = Math.max(8, cfg.getInt("hider.cave-ray-pitch-steps", 24));
 
     this.spawnerMaskAboveY = cfg.getInt("hider.spawner-mask-above-y", 120);
     this.spawnerRevealDistance = Math.max(1, cfg.getInt("hider.spawner-reveal-distance", 20));
@@ -202,6 +210,26 @@ public class RevealManager {
     return set != null && set.contains(chunkKey(chunkX, chunkZ));
   }
 
+  public boolean isCaveBlockVisible(Player player, int x, int y, int z) {
+    if (y >= floorY) return false;
+    ConcurrentMap<Long, LongOpenHashSet> byChunk = visibleCaveBlocks.get(player.getUniqueId());
+    if (byChunk == null) return false;
+    LongOpenHashSet blocks = byChunk.get(chunkKey(x >> 4, z >> 4));
+    return blocks != null && blocks.contains(packPos(x, y, z));
+  }
+
+  public LongOpenHashSet visibleCaveSet(Player player, int chunkX, int chunkZ) {
+    ConcurrentMap<Long, LongOpenHashSet> byChunk = visibleCaveBlocks.get(player.getUniqueId());
+    return byChunk == null ? null : byChunk.get(chunkKey(chunkX, chunkZ));
+  }
+
+  public boolean isCaveChunkVisible(Player player, int chunkX, int chunkZ) {
+    ConcurrentMap<Long, LongOpenHashSet> byChunk = visibleCaveBlocks.get(player.getUniqueId());
+    if (byChunk == null) return false;
+    LongOpenHashSet blocks = byChunk.get(chunkKey(chunkX, chunkZ));
+    return blocks != null && !blocks.isEmpty();
+  }
+
   public boolean isBarrierBandRevealed(Player player, int chunkX, int chunkZ) {
     if (upperY <= floorY) return true;
     int playerY = player.getLocation().getBlockY();
@@ -222,14 +250,14 @@ public class RevealManager {
     int chunkX = x >> 4;
     int chunkZ = z >> 4;
     if (y < floorY) {
-      return isChunkRevealed(player, chunkX, chunkZ);
+      return isCaveBlockVisible(player, x, y, z);
     }
     return isBarrierBandRevealed(player, chunkX, chunkZ);
   }
 
   /** Returns whether any part of a chunk column is currently visible. */
   public boolean isChunkVisible(Player player, int chunkX, int chunkZ) {
-    return isChunkRevealed(player, chunkX, chunkZ)
+    return isCaveChunkVisible(player, chunkX, chunkZ)
         || (upperY > floorY && isBarrierBandRevealed(player, chunkX, chunkZ));
   }
 
@@ -342,97 +370,130 @@ public class RevealManager {
       return;
     }
 
-    Set<Long> playerChunkSet = revealedChunks.computeIfAbsent(playerId, ignoredKey -> ConcurrentHashMap.newKeySet());
-
-    Set<Long> desiredChunks = new HashSet<>();
-    boolean nearFloor = playerY <= floorY;
-    if (nearFloor) {
-      addChunkSquare(desiredChunks, playerChunkX, playerChunkZ, movementRadius);
-      int floodStartY = Math.min(playerY, floorY - 1);
-      desiredChunks.addAll(getCachedCaveFlood(playerId, player.getWorld(),
-          playerChunkX << 4, floodStartY, playerChunkZ << 4));
-    }
-
-    if (desiredChunks.isEmpty()) {
-      hideStaleRevealed(player, playerChunkSet, desiredChunks, playerChunkX, playerChunkZ);
-      surfacedSinceTick.remove(playerId);
-      refreshBarrierBand(player, playerId, playerChunkX, playerChunkZ, playerY);
-      refreshGeodeVisibility(player);
-      refreshSpawnerVisibility(player);
-      refreshEntityVisibility(player);
-      return;
-    }
-
-    surfacedSinceTick.remove(playerId);
-    hideStaleRevealed(player, playerChunkSet, desiredChunks, playerChunkX, playerChunkZ);
-
-    Set<Long> chunksToReveal = new HashSet<>(desiredChunks);
-    chunksToReveal.removeAll(playerChunkSet);
-
-    if (verbose) {
-      LogData.get().info("[hider] " + player.getName()
-          + " recompute: playerChunkX=" + playerChunkX + " playerChunkZ=" + playerChunkZ + " playerY=" + playerY
-          + " desiredChunks=" + desiredChunks.size() + " revealedChunks=" + playerChunkSet.size()
-          + " +reveal=" + chunksToReveal.size());
-    }
-
-    if (chunksToReveal.isEmpty()) {
-      refreshBarrierBand(player, playerId, playerChunkX, playerChunkZ, playerY);
-      refreshGeodeVisibility(player);
-      refreshSpawnerVisibility(player);
-      refreshEntityVisibility(player);
-      return;
-    }
-
-    int revealBudget = maxRevealPerRecompute;
-    java.util.List<Long> ordered = new java.util.ArrayList<>(chunksToReveal);
-    ordered.sort(java.util.Comparator.comparingInt(ignoredKey -> Math.max(
-        Math.abs(keyX(ignoredKey) - playerChunkX), Math.abs(keyZ(ignoredKey) - playerChunkZ))));
-    for (long chunkKeyValue : ordered) {
-      if (revealBudget <= 0) {
-        break;
-      }
-      playerChunkSet.add(chunkKeyValue);
-      revealUndergroundChunks(player, keyX(chunkKeyValue), keyZ(chunkKeyValue));
-      notifyChunkRevealed(player, keyX(chunkKeyValue), keyZ(chunkKeyValue));
-      revealBudget--;
-    }
-
-    evictFarRevealedChunks(player, playerChunkSet, playerChunkX, playerChunkZ);
+    refreshVisibleCave(player);
     refreshBarrierBand(player, playerId, playerChunkX, playerChunkZ, playerY);
     refreshGeodeVisibility(player);
     refreshSpawnerVisibility(player);
     refreshEntityVisibility(player);
   }
 
-  /**
-   * Masks chunks that were revealed earlier but are no longer part of the
-   * viewer's desired reveal area while still underground. Chunks revealed
-   * before the player returns above the floor stay visible until they unload.
-   */
-  private void hideStaleRevealed(Player player, Set<Long> currentlyRevealed, Set<Long> desiredChunks,
-      int playerChunkX, int playerChunkZ) {
-    if (currentlyRevealed.isEmpty()) {
-      return;
+  public void refreshVisibleCave(Player player) {
+    if (!player.isOnline()) return;
+    Location eye = player.getEyeLocation();
+    if (eye.getBlockY() > floorY) return;
+    World world = eye.getWorld();
+    if (world == null) return;
+
+    ConcurrentMap<Long, LongOpenHashSet> byChunk =
+        visibleCaveBlocks.computeIfAbsent(player.getUniqueId(),
+            ignoredKey -> new ConcurrentHashMap<>());
+    Map<Long, LongOpenHashSet> additions = new HashMap<>();
+
+    double eyeX = eye.getX();
+    double eyeY = eye.getY();
+    double eyeZ = eye.getZ();
+    int minY = Math.max(worldMinY, world.getMinHeight());
+    int maxDistance = caveVisibleDistance;
+
+    for (int yawIndex = 0; yawIndex < caveRayYawSteps; yawIndex++) {
+      double yawRad = Math.toRadians(360.0 * yawIndex / caveRayYawSteps);
+      double horizontalX = -Math.sin(yawRad);
+      double horizontalZ = Math.cos(yawRad);
+      for (int pitchIndex = 0; pitchIndex < caveRayPitchSteps; pitchIndex++) {
+        double pitchRad = Math.toRadians(
+            -80.0 + 160.0 * pitchIndex / Math.max(1, caveRayPitchSteps - 1));
+        double horizontalScale = Math.cos(pitchRad);
+        double rayX = horizontalX * horizontalScale;
+        double rayY = -Math.sin(pitchRad);
+        double rayZ = horizontalZ * horizontalScale;
+
+        int lastX = Integer.MIN_VALUE;
+        int lastY = Integer.MIN_VALUE;
+        int lastZ = Integer.MIN_VALUE;
+        for (double distance = 0.5; distance <= maxDistance; distance += 0.75) {
+          int x = (int) Math.floor(eyeX + rayX * distance);
+          int y = (int) Math.floor(eyeY + rayY * distance);
+          int z = (int) Math.floor(eyeZ + rayZ * distance);
+          if (x == lastX && y == lastY && z == lastZ) {
+            continue;
+          }
+          lastX = x;
+          lastY = y;
+          lastZ = z;
+          if (y >= floorY || y < minY) {
+            break;
+          }
+          if (!world.isChunkLoaded(x >> 4, z >> 4)) {
+            break;
+          }
+          Material type = world.getType(x, y, z);
+          addVisibleCaveBlock(additions, x, y, z);
+          if (type.isOccluding()) {
+            break;
+          }
+        }
+      }
     }
-    int playerY = player.getLocation().getBlockY();
-    if (playerY > floorY) {
-      return;
-    }
-    Set<Long> keep = new HashSet<>(desiredChunks);
-    addChunkSquare(keep, playerChunkX, playerChunkZ, stickyRadius);
-    int budget = maxHidePerRecompute;
-    for (long key : new HashSet<>(currentlyRevealed)) {
-      if (keep.contains(key)) {
+
+    mergeVisibleCave(player, byChunk, additions);
+  }
+
+  private static void addVisibleCaveBlock(
+      Map<Long, LongOpenHashSet> additions, int x, int y, int z) {
+    additions.computeIfAbsent(chunkKey(x >> 4, z >> 4), ignoredKey -> new LongOpenHashSet())
+        .add(packPos(x, y, z));
+  }
+
+  private void mergeVisibleCave(Player player,
+      ConcurrentMap<Long, LongOpenHashSet> byChunk,
+      Map<Long, LongOpenHashSet> additions) {
+    for (Map.Entry<Long, LongOpenHashSet> entry : additions.entrySet()) {
+      long chunkKeyValue = entry.getKey();
+      LongOpenHashSet newBlocks = entry.getValue();
+      LongOpenHashSet oldBlocks = byChunk.get(chunkKeyValue);
+      if (oldBlocks != null && oldBlocks.containsAll(newBlocks)) {
         continue;
       }
-      currentlyRevealed.remove(key);
-      maskUndergroundChunks(player, keyX(key), keyZ(key));
-      if (--budget <= 0) {
-        break;
+      LongOpenHashSet merged = oldBlocks == null
+          ? new LongOpenHashSet(newBlocks)
+          : new LongOpenHashSet(oldBlocks);
+      merged.addAll(newBlocks);
+      byChunk.put(chunkKeyValue, merged);
+      if (wasChunkDeliveredTo(player.getUniqueId(),
+          keyX(chunkKeyValue), keyZ(chunkKeyValue))) {
+        sendVisibleCaveBlocks(player, chunkKeyValue, oldBlocks, newBlocks);
       }
     }
   }
+
+  private void sendVisibleCaveBlocks(Player player, long chunkKeyValue,
+      LongOpenHashSet oldBlocks, LongOpenHashSet newBlocks) {
+    World world = player.getWorld();
+    int chunkX = keyX(chunkKeyValue);
+    int chunkZ = keyZ(chunkKeyValue);
+    if (!world.isChunkLoaded(chunkX, chunkZ)) return;
+    ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot();
+    Map<Location, BlockData> batch = new HashMap<>(4096);
+
+    for (long packed : newBlocks) {
+      if (oldBlocks != null && oldBlocks.contains(packed)) {
+        continue;
+      }
+      int x = unpackX(packed);
+      int y = unpackY(packed);
+      int z = unpackZ(packed);
+      batch.put(new Location(world, x, y, z),
+          snapshot.getBlockData(x & 15, y, z & 15));
+      if (batch.size() >= 4096) {
+        player.sendMultiBlockChange(batch);
+        batch.clear();
+      }
+    }
+    if (!batch.isEmpty()) {
+      player.sendMultiBlockChange(batch);
+    }
+  }
+
 
   private void refreshBarrierBand(Player player, UUID playerId, int playerChunkX, int playerChunkZ, int playerY) {
     if (upperY <= floorY) return;
@@ -829,17 +890,7 @@ public class RevealManager {
   }
 
   public void revealAround(Player player, int centerX, int centerZ, int radius) {
-    if (player.getLocation().getBlockY() > floorY) {
-      return;
-    }
-    Set<Long> set = revealedChunks.computeIfAbsent(
-        player.getUniqueId(), ignoredKey -> ConcurrentHashMap.newKeySet());
-    for (int dx = -radius; dx <= radius; dx++) {
-      for (int dz = -radius; dz <= radius; dz++) {
-        int chunkX = centerX + dx, chunkZ = centerZ + dz;
-        if (set.add(chunkKey(chunkX, chunkZ))) revealUndergroundChunks(player, chunkX, chunkZ);
-      }
-    }
+    refreshVisibleCave(player);
   }
 
   public void revealBarrierBandOnJoin(Player player, int centerX, int centerZ) {
@@ -999,6 +1050,7 @@ public class RevealManager {
       revealedBarrierChunks.remove(playerId);
       revealedGeodeChunks.remove(playerId);
       revealedSpawnerPositions.remove(playerId);
+      visibleCaveBlocks.remove(playerId);
     }
   }
 
@@ -1175,6 +1227,9 @@ public class RevealManager {
     long chunkKeyValue = chunkKey(chunkX, chunkZ);
     for (Set<Long> set : revealedGeodeChunks.values())  set.remove(chunkKeyValue);
     for (Set<Long> set : deliveredChunkKeys.values()) set.remove(chunkKeyValue);
+    for (ConcurrentMap<Long, LongOpenHashSet> byChunk : visibleCaveBlocks.values()) {
+      byChunk.remove(chunkKeyValue);
+    }
   }
 
   public void handleChunkUnload(org.bukkit.Chunk chunk) {
@@ -1199,6 +1254,13 @@ public class RevealManager {
       }
     }
     for (Map.Entry<UUID, Set<Long>> entry : revealedBarrierChunks.entrySet()) {
+      Player player = Bukkit.getPlayer(entry.getKey());
+      if (player != null && player.getWorld().equals(world)) {
+        entry.getValue().remove(chunkKeyValue);
+      }
+    }
+    for (Map.Entry<UUID, ConcurrentMap<Long, LongOpenHashSet>> entry
+        : visibleCaveBlocks.entrySet()) {
       Player player = Bukkit.getPlayer(entry.getKey());
       if (player != null && player.getWorld().equals(world)) {
         entry.getValue().remove(chunkKeyValue);

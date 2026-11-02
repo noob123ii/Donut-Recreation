@@ -66,13 +66,13 @@ public final class AmethystProtection {
       }
     }
 
-    if (positions.isEmpty() || revealManager.isGeodeVisibleTo(player, chunkX, chunkZ)) {
+    if (positions.isEmpty()) {
       return false;
     }
 
     enhanceGeodeBuds(sections, positions, minSection);
 
-    int swapped = maskPositions(sections, positions, minSection, revealManager.hideBelowY(), player.getWorld());
+    int swapped = maskPositions(sections, positions, minSection, revealManager.hideBelowY(), player);
     if (swapped <= 0) {
       return false;
     }
@@ -111,6 +111,9 @@ public final class AmethystProtection {
 
     syncCache(nowAmethyst, wasAmethyst, x, y, z);
 
+    if (revealManager.isCaveBlockVisible(player, x, y, z)) {
+      return false;
+    }
     if ((nowAmethyst || wasAmethyst) && !revealManager.isGeodeVisibleTo(player, x >> 4, z >> 4)) {
       int target = blockIds.floorId();
       wrapper.setBlockState(WrappedBlockState.getByGlobalId(target));
@@ -147,6 +150,9 @@ public final class AmethystProtection {
           player.getUniqueId(), blockX, blockY, blockZ)) {
         continue;
       }
+      if (revealManager.isCaveBlockVisible(player, blockX, blockY, blockZ)) {
+        continue;
+      }
       int blockId = enc.getBlockId();
       boolean nowAmethyst = blockIds.isAmethyst(blockId);
       long packed = RevealManager.packPos(blockX, blockY, blockZ);
@@ -154,7 +160,8 @@ public final class AmethystProtection {
 
       syncCache(nowAmethyst, wasAmethyst, blockX, blockY, blockZ);
 
-      if (!revealedHere && (nowAmethyst || wasAmethyst)) {
+      boolean visibleHere = blockY >= floorY && revealedHere;
+      if (!visibleHere && (nowAmethyst || wasAmethyst)) {
         int target = blockIds.floorId();
         enc.setBlockId(target);
         swaps++;
@@ -275,12 +282,16 @@ public final class AmethystProtection {
     }
   }
 
-  private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection, int floorY, World world) {
+  private int maskPositions(BaseChunk[] sections, Set<Long> positions, int minSection,
+      int floorY, Player player) {
     int swapped = 0;
     for (long packed : positions) {
       int worldX = RevealManager.unpackX(packed);
       int worldY = RevealManager.unpackY(packed);
       int worldZ = RevealManager.unpackZ(packed);
+      if (revealManager.isCaveBlockVisible(player, worldX, worldY, worldZ)) {
+        continue;
+      }
 
       int sectionIndex = (worldY >> 4) - minSection;
       if (sectionIndex < 0 || sectionIndex >= sections.length) {

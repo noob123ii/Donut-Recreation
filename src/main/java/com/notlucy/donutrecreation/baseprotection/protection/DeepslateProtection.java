@@ -8,6 +8,7 @@ import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.world.chunk.BaseChunk;
 import com.github.retrooper.packetevents.protocol.world.chunk.Column;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
+import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
@@ -56,6 +57,7 @@ public final class DeepslateProtection {
     boolean geodeChunk = Math.abs(geodeNoise(chunkX, 999, chunkZ, salt) % 100) <= 8;
     int[] geodeBudget = {revealManager.fakeGeodeAmethystPerChunk()};
     boolean lowerRevealed = revealManager.isChunkRevealed(player, chunkX, chunkZ);
+    LongOpenHashSet visibleCave = revealManager.visibleCaveSet(player, chunkX, chunkZ);
     boolean upperRevealed = revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
     boolean upperActive = upperY > floorY;
     int spawnerMaskAboveY = revealManager.spawnerMaskAboveY();
@@ -80,7 +82,7 @@ public final class DeepslateProtection {
         int toY = Math.min(16, floorY - worldOriginY);
         if (toY > 0) {
           fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, 0, toY,
-              salt, player, geodeChunk, geodeBudget, scanSpawners);
+              salt, player, geodeChunk, geodeBudget, scanSpawners, visibleCave);
           touched = true;
           modifiedSections++;
         }
@@ -90,7 +92,7 @@ public final class DeepslateProtection {
         int toY = Math.min(16, upperY - worldOriginY);
         if (toY > fromY) {
           fillNoise(section, worldOriginX, worldOriginY, worldOriginZ, fromY, toY,
-              salt, player, geodeChunk, geodeBudget, scanSpawners);
+              salt, player, geodeChunk, geodeBudget, scanSpawners, visibleCave);
           touched = true;
           modifiedSections++;
         }
@@ -178,7 +180,8 @@ public final class DeepslateProtection {
     int chunkZ = z >> 4;
     int salt = revealManager.getPlayerSalt(player.getUniqueId());
     if (y < floorY) {
-      if (revealManager.isChunkRevealed(player, chunkX, chunkZ)) {
+      if (revealManager.isCaveBlockVisible(player, x, y, z)
+          || revealManager.isChunkRevealed(player, chunkX, chunkZ)) {
         return false;
       }
       wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.floorIdAt(salt, x, y, z)));
@@ -209,7 +212,7 @@ public final class DeepslateProtection {
   private void fillNoise(
       BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
       int lowY, int highY, int salt, Player player,
-      boolean geodeChunk, int[] geodeBudget, boolean preserveSpawners) {
+      boolean geodeChunk, int[] geodeBudget, boolean preserveSpawners, LongOpenHashSet visibleCave) {
     java.util.UUID playerId = player.getUniqueId();
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(playerId);
     for (int x = 0; x < 16; x++) {
@@ -219,6 +222,10 @@ public final class DeepslateProtection {
         for (int y = lowY; y < highY; y++) {
           int worldY = worldOriginY + y;
           if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
+            continue;
+          }
+          if (visibleCave != null
+              && visibleCave.contains(RevealManager.packPos(worldX, worldY, worldZ))) {
             continue;
           }
           if (preserveSpawners && section.getBlockId(x, y, z) == blockIds.spawnerId()) {

@@ -87,6 +87,11 @@ AIR until the viewer is within render distance.
 **Sound & particle dampers:** Certain sounds/particles that leak hidden chunk data are
 suppressed or re-spatialised.
 
+**Line-of-sight cave reveal:** While below the floor, the hider casts visibility rays from
+the player's eyes and unmaskes only the cave blocks the player can actually see. Connected
+caves behind walls and blocks under the cave stay masked. Revealed cave blocks stay visible
+after returning above the floor and are rehidden when their chunk unloads.
+
 **Salt rotation:** Noise pattern is salted per-player and rotates periodically (default
 12,000 ticks). Prevents clients from building a static map of the fake floor.
 
