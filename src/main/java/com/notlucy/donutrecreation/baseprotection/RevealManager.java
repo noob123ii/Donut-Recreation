@@ -1121,7 +1121,7 @@ public class RevealManager {
       Bukkit.getScheduler().runTaskLater(plugin, () -> {
         Player player = Bukkit.getPlayer(playerId);
         if (player == null || !player.isOnline()) return;
-        if (alreadyRevealed) {
+        if (alreadyRevealed && player.getLocation().getBlockY() <= floorY) {
           revealUndergroundChunks(player, fromChunkX, fromChunkZ);
         }
         if (alreadyUpper) {

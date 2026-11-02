@@ -56,7 +56,8 @@ public final class DeepslateProtection {
     long worldSeed = player.getWorld().getSeed();
     boolean geodeChunk = Math.abs(geodeNoise(chunkX, 999, chunkZ, salt) % 100) <= 8;
     int[] geodeBudget = {revealManager.fakeGeodeAmethystPerChunk()};
-    boolean lowerRevealed = revealManager.isChunkRevealed(player, chunkX, chunkZ);
+    boolean lowerRevealed = player.getLocation().getBlockY() <= floorY
+        && revealManager.isChunkRevealed(player, chunkX, chunkZ);
     LongOpenHashSet visibleCave = revealManager.visibleCaveSet(player, chunkX, chunkZ);
     boolean upperRevealed = revealManager.isBarrierBandRevealed(player, chunkX, chunkZ);
     boolean upperActive = upperY > floorY;
