@@ -250,11 +250,15 @@ public class SusCommand implements CommandExecutor, Listener {
       meta.setOwningPlayer(target);
     }
     meta.setDisplayName(plugin.color("&e" + flag.targetName() + "'s Head"));
-    meta.setLore(Arrays.asList(
-        plugin.color("&dFlags: &f" + flag.count()),
-        plugin.color("&dLast flag: &f" + flag.reason()),
-        plugin.color("&dCategory: &f" + flag.category()),
-        plugin.color("&dLeft click: &fSpectate player")));
+    java.util.List<String> lore = new ArrayList<>();
+    lore.add(plugin.color("&dFlags: &f" + flag.count()));
+    lore.add(plugin.color("&dLast flag: &f" + flag.reason()));
+    lore.add(plugin.color("&dCategory: &f" + flag.category()));
+    for (var source : flag.sources().entrySet()) {
+      lore.add(plugin.color("&d" + source.getKey() + ": &f" + source.getValue()));
+    }
+    lore.add(plugin.color("&dLeft click: &fSpectate player"));
+    meta.setLore(lore);
     meta.getPersistentDataContainer().set(targetKey, PersistentDataType.STRING, flag.targetId().toString());
     item.setItemMeta(meta);
     return item;

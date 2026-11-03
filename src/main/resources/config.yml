@@ -4,6 +4,9 @@ logging:
 
 config-version: 2
 
+acsus:
+  custom-anticheats: {}
+
 packet-audit:
   enabled: true
   log-new-types: true

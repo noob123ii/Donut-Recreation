@@ -3,6 +3,7 @@ package com.notlucy.donutrecreation.sus.model;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -27,8 +28,13 @@ public class SusFlagManager {
 
   public void flag(UUID uuid, String name, String reason, String category) {
     String cat = (category != null) ? category : "custom";
-    flags.compute(uuid, (id, last) -> new SusFlag(
-        id, name, reason, last == null ? 1 : last.count() + 1, Instant.now(), cat));
+    flags.compute(uuid, (id, last) -> {
+      Map<String, Integer> sources = last == null
+          ? new HashMap<>() : new HashMap<>(last.sources());
+      sources.merge(cat, 1, Integer::sum);
+      return new SusFlag(id, name, reason, last == null ? 1 : last.count() + 1,
+          Instant.now(), cat, sources);
+    });
   }
 
   public SusFlag getFlag(UUID targetId) {

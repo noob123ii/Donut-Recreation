@@ -23,6 +23,26 @@ mining bursts, macro-like repetition, and anti-cheat plugin flags in the backgro
 Anti-cheat detection notifications are broadcast to staff in the format:
 `[Matrix] PlayerName: hack reason (N flags)`
 
+The hook manager knows Vulcan, Matrix, GrimAC, NoCheatPlus, AAC, Spartan, Verus,
+Intave, Polar, Karhu, Kauri, Reflex, Horizon, Themis, Medusa, Artemis, Dusk, Echo and
+Errata. It also scans every installed plugin jar for Bukkit flag/violation/alert events,
+so custom anti-cheats are discovered automatically. Each player's GUI head shows the
+per-anti-cheat flag counts as well as the total.
+
+Custom hooks can be declared when a plugin uses unusual event names:
+
+```yaml
+acsus:
+  custom-anticheats:
+    MyAC:
+      event-class: com.example.MyACFlagEvent
+      category: myac
+      name: MyAC
+      reason-methods:
+        - getCheck
+        - getViolations
+```
+
 While spectating, a leash task re-teleports you to the target every 10 ticks if they get
 further than 100 blocks away, so the suspect can't shake the review.
 

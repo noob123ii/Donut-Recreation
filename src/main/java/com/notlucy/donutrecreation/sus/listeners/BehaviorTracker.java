@@ -2,12 +2,20 @@ package com.notlucy.donutrecreation.sus.listeners;
 
 import com.notlucy.donutrecreation.DonutRecreation;
 import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
+import java.io.File;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.jar.JarEntry;
+import java.util.jar.JarFile;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
@@ -38,6 +46,12 @@ public class BehaviorTracker implements Listener {
 
   private final DonutRecreation plugin;
   private final Map<UUID, State> states = new HashMap<>();
+  private final Set<String> hookedEventClasses = ConcurrentHashMap.newKeySet();
+  private final Set<String> hookedPlugins = ConcurrentHashMap.newKeySet();
+  private static final String[] DEFAULT_REASON_METHODS = {
+      "getCheckName", "getCheck", "getHackType", "getType", "getMessage",
+      "getDescription", "getViolations", "getViolationLevel"
+  };
 
   @SuppressFBWarnings(
       value = "EI_EXPOSE_REP2",
@@ -70,6 +84,109 @@ public class BehaviorTracker implements Listener {
     hookAntiCheat("AAC", "aac", "AAC", new String[]{
         "me.maxHenrikDev.AAC.events.AACViolationEvent"},
         new String[]{"getCheck", "getViolationLevel"});
+    registerAdditionalAntiCheats();
+    hookCustomAntiCheats();
+    discoverAntiCheatEvents();
+    plugin.getLogger().info("[acsus] anti-cheat hooks registered: "
+        + hookedPlugins.size() + " plugin(s)");
+  }
+
+  private void registerAdditionalAntiCheats() {
+    hookAntiCheat("Spartan", "spartan", "Spartan", new String[]{
+        "me.vagdedes.spartan.api.PlayerViolationEvent",
+        "me.vagdedes.spartan.api.event.PlayerViolationEvent"},
+        new String[]{"getViolation", "getCheck", "getHackType", "getMessage"});
+    hookAntiCheat("Verus", "verus", "Verus", new String[]{
+        "me.verus.api.event.FlagEvent",
+        "me.verus.api.event.PlayerViolationEvent"},
+        new String[]{"getCheck", "getCheckName", "getViolation", "getMessage"});
+    hookAntiCheat("Intave", "intave", "Intave", new String[]{
+        "de.jpx3.intave.api.event.IntaveFlagEvent",
+        "de.jpx3.intave.api.event.AsyncFlagEvent",
+        "de.jpx3.intave.api.event.FlagEvent"},
+        new String[]{"getCheck", "getCheckName", "getViolation", "getMessage"});
+    hookAntiCheat("Polar", "polar", "Polar", new String[]{
+        "top.polar.api.event.anticheat.FlagEvent",
+        "top.polar.api.event.anticheat.PlayerFlagEvent"},
+        new String[]{"getCheck", "getCheckName", "getViolation", "getMessage"});
+    hookAntiCheat("Karhu", "karhu", "Karhu", new String[]{
+        "cc.funkemunky.api.events.impl.FlagEvent",
+        "cc.funkemunky.api.events.impl.PlayerFlagEvent"},
+        new String[]{"getCheck", "getCheckName", "getViolation", "getMessage"});
+    hookAntiCheat("Kauri", "kauri", "Kauri", new String[]{
+        "me.kauri.api.event.FlagEvent",
+        "me.kauri.api.events.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Reflex", "reflex", "Reflex", new String[]{
+        "me.reflex.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Horizon", "horizon", "Horizon", new String[]{
+        "dev.horizon.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Themis", "themis", "Themis", new String[]{
+        "me.themis.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Medusa", "medusa", "Medusa", new String[]{
+        "me.medusa.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Artemis", "artemis", "Artemis", new String[]{
+        "me.artemis.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Dusk", "dusk", "Dusk", new String[]{
+        "me.dusk.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Echo", "echo", "Echo", new String[]{
+        "me.echo.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+    hookAntiCheat("Errata", "errata", "Errata", new String[]{
+        "me.errata.api.event.FlagEvent"},
+        DEFAULT_REASON_METHODS);
+  }
+
+  private void hookCustomAntiCheats() {
+    var section = plugin.getConfig().getConfigurationSection("acsus.custom-anticheats");
+    if (section == null) {
+      return;
+    }
+    for (String key : section.getKeys(false)) {
+      var entry = section.getConfigurationSection(key);
+      if (entry == null) {
+        continue;
+      }
+      String eventClassName = entry.getString("event-class");
+      if (eventClassName == null || eventClassName.isBlank()) {
+        continue;
+      }
+      Class<?> eventClass = findClass(eventClassName);
+      if (eventClass == null) {
+        plugin.getLogger().warning("[acsus] custom anti-cheat " + key
+            + " event class not found: " + eventClassName);
+        continue;
+      }
+      List<String> configuredMethods = entry.getStringList("reason-methods");
+      String[] methods = configuredMethods.isEmpty()
+          ? DEFAULT_REASON_METHODS : configuredMethods.toArray(new String[0]);
+      String category = entry.getString("category", key)
+          .toLowerCase(Locale.ROOT);
+      String displayName = entry.getString("name", key);
+      if (registerEventHook(plugin, key, displayName, category, eventClass, methods)) {
+        plugin.getLogger().info("[acsus] hooked custom anti-cheat " + displayName);
+      }
+    }
+  }
+
+  private static Class<?> findClass(String name) {
+    try {
+      return Class.forName(name, false, BehaviorTracker.class.getClassLoader());
+    } catch (Throwable ignored) {
+    }
+    for (Plugin candidate : Bukkit.getPluginManager().getPlugins()) {
+      try {
+        return Class.forName(name, false, candidate.getClass().getClassLoader());
+      } catch (Throwable ignored) {
+      }
+    }
+    return null;
   }
 
   private void hookAntiCheat(String pluginName, String category, String displayName,
@@ -119,8 +236,131 @@ public class BehaviorTracker implements Listener {
           new RegisteredListener(listener, executor, EventPriority.MONITOR, plugin, false));
       plugin.getLogger().info("[acsus] hooked " + pluginName + " flags -> /acsus ("
           + expected.getName() + ")");
+      hookedPlugins.add(pluginName.toLowerCase(Locale.ROOT));
+      hookedEventClasses.add(expected.getName());
     } catch (Throwable e) {
       plugin.getLogger().warning("[acsus] failed to hook " + pluginName + ": " + e);
+    }
+  }
+
+  private void discoverAntiCheatEvents() {
+    for (Plugin candidate : Bukkit.getPluginManager().getPlugins()) {
+      if (candidate == plugin) {
+        continue;
+      }
+      if (hookedPlugins.contains(candidate.getName().toLowerCase(Locale.ROOT))) {
+        continue;
+      }
+      try {
+        scanPlugin(candidate);
+      } catch (Throwable error) {
+        plugin.getLogger().fine("[acsus] discovery skipped " + candidate.getName()
+            + ": " + error.getMessage());
+      }
+    }
+  }
+
+  private void scanPlugin(Plugin candidate) throws Exception {
+    var source = candidate.getClass().getProtectionDomain().getCodeSource();
+    if (source == null) {
+      return;
+    }
+    File file = new File(source.getLocation().toURI());
+    if (file.isFile() && file.getName().endsWith(".jar")) {
+      try (JarFile jar = new JarFile(file)) {
+        var entries = jar.entries();
+        int scanned = 0;
+        while (entries.hasMoreElements() && scanned < 400) {
+          JarEntry entry = entries.nextElement();
+          String className = candidateClass(entry.getName());
+          if (className != null) {
+            scanned++;
+            tryDiscoveredEvent(candidate, className);
+          }
+        }
+      }
+    } else if (file.isDirectory()) {
+      scanClassDirectory(candidate, file, file, 0);
+    }
+  }
+
+  private void scanClassDirectory(Plugin candidate, File root, File current, int depth) {
+    if (depth > 8) {
+      return;
+    }
+    File[] files = current.listFiles();
+    if (files == null) {
+      return;
+    }
+    for (File file : files) {
+      if (file.isDirectory()) {
+        scanClassDirectory(candidate, root, file, depth + 1);
+        continue;
+      }
+      String relative = root.toURI().relativize(file.toURI()).getPath();
+      String className = candidateClass(relative);
+      if (className != null) {
+        tryDiscoveredEvent(candidate, className);
+      }
+    }
+  }
+
+  private static String candidateClass(String entryName) {
+    if (!entryName.endsWith(".class")) {
+      return null;
+    }
+    String lower = entryName.toLowerCase(Locale.ROOT);
+    if (!lower.contains("flag") && !lower.contains("violation")
+        && !lower.contains("alert") && !lower.contains("detection")
+        && !lower.contains("punish") && !lower.contains("check")) {
+      return null;
+    }
+    return entryName.substring(0, entryName.length() - 6).replace('/', '.');
+  }
+
+  private void tryDiscoveredEvent(Plugin candidate, String className) {
+    if (hookedPlugins.contains(candidate.getName().toLowerCase(Locale.ROOT))) {
+      return;
+    }
+    Class<?> eventClass = findClass(className);
+    if (eventClass == null) {
+      return;
+    }
+    try {
+      eventClass.getMethod("getHandlerList");
+      eventClass.getMethod("getPlayer");
+    } catch (Throwable notAnEvent) {
+      return;
+    }
+    String category = candidate.getName().toLowerCase(Locale.ROOT)
+        .replaceAll("[^a-z0-9]", "");
+    registerEventHook(candidate, candidate.getName(), candidate.getName(),
+        category, eventClass, DEFAULT_REASON_METHODS);
+  }
+
+
+  private boolean registerEventHook(Plugin owner, String pluginName,
+      String displayName, String category, Class<?> eventClass, String[] reasonMethods) {
+    try {
+      if (!org.bukkit.event.Event.class.isAssignableFrom(eventClass)) {
+        return false;
+      }
+      if (!hookedEventClasses.add(eventClass.getName())) {
+        return true;
+      }
+      Object handlers = eventClass.getMethod("getHandlerList").invoke(null);
+      Listener listener = new Listener() { };
+      EventExecutor executor = (l, event) ->
+          handleFlag(event, eventClass, category, displayName, reasonMethods);
+      handlers.getClass().getMethod("register", RegisteredListener.class).invoke(
+          handlers,
+          new RegisteredListener(listener, executor, EventPriority.MONITOR, owner, false));
+      hookedPlugins.add(pluginName.toLowerCase(Locale.ROOT));
+      plugin.getLogger().info("[acsus] hooked " + displayName + " flags -> /acsus ("
+          + eventClass.getName() + ")");
+      return true;
+    } catch (Throwable error) {
+      return false;
     }
   }
 
