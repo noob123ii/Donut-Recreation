@@ -4,6 +4,13 @@ logging:
 
 config-version: 2
 
+packet-audit:
+  enabled: true
+  log-new-types: true
+  report-interval-seconds: 0
+  block-unhandled-risky: true
+  blocked-packets: []
+
 hider:
   enabled: true
   hide-below-y: 0

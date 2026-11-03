@@ -22,6 +22,7 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
   private StashManager stashManager;
   private ChunkGenerator chunkGenerator;
   private com.notlucy.donutrecreation.baseprotection.packet.PacketHider packetHider;
+  private com.notlucy.donutrecreation.baseprotection.packet.PacketAuditManager packetAudit;
 
   public DonutCommand(DonutRecreation plugin, PlayerDataStore store) {
     this.plugin = plugin;
@@ -38,6 +39,7 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
 
   public void setPacketHider(com.notlucy.donutrecreation.baseprotection.packet.PacketHider packetHider) {
     this.packetHider = packetHider;
+    this.packetAudit = packetHider == null ? null : packetHider.audit();
   }
 
   @Override
@@ -94,6 +96,21 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       }
       return true;
     }
+    if ("packets".equalsIgnoreCase(args[0])) {
+      if (packetAudit == null) {
+        sender.sendMessage(plugin.color("&cPacket audit manager is not initialized."));
+        return true;
+      }
+      if (args.length > 1 && "clear".equalsIgnoreCase(args[1])) {
+        packetAudit.clear();
+        sender.sendMessage(plugin.color("&aPacket audit statistics cleared."));
+        return true;
+      }
+      for (String line : packetAudit.reportLines(100)) {
+        sender.sendMessage(plugin.color("&7" + line));
+      }
+      return true;
+    }
     sender.sendMessage(plugin.color("&cUsage: /donut reload | /donut chunk generate <border>"));
     return true;
   }
@@ -111,11 +128,20 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       if ("chunk".toLowerCase().startsWith(args[0].toLowerCase())) {
         return List.of("chunk");
       }
+      if ("packets".toLowerCase().startsWith(args[0].toLowerCase())) {
+        return List.of("packets");
+      }
       return Collections.emptyList();
     }
     if (args.length == 2 && "chunk".equalsIgnoreCase(args[0])) {
       if ("generate".toLowerCase().startsWith(args[1].toLowerCase())) {
         return List.of("generate");
+      }
+      return Collections.emptyList();
+    }
+    if (args.length == 2 && "packets".equalsIgnoreCase(args[0])) {
+      if ("clear".toLowerCase().startsWith(args[1].toLowerCase())) {
+        return List.of("clear");
       }
       return Collections.emptyList();
     }

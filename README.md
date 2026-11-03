@@ -116,6 +116,15 @@ player, experience orb, painting, weather), position sync / teleport / relative 
 metadata, equipment, status, velocity, effects, passengers, NBT and destroy packets.
 Block-entity, sound, particle and explosion packets are masked for unrevealed regions.
 
+### Packet audit
+
+`packet-audit` records every outgoing packet type seen by the server, classifies each as
+block data, entity data, player data, world event, UI, or other, and reports whether the
+hider handles it and whether it was blocked. New packet types are logged once. Use
+`/donut packets` for the current report and `/donut packets clear` to reset counters.
+Entries in `packet-audit.blocked-packets` always cancel matching packet names.
+`block-unhandled-risky` blocks unhandled block/entity packets automatically.
+
 ---
 
 ## Alt-Evasion

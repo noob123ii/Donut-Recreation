@@ -84,6 +84,7 @@ public class PacketHider {
 
   private final RevealManager revealManager;
   private final BlockIdRegistry registry;
+  private final PacketAuditManager audit;
   private final AtomicInteger failureCount = new AtomicInteger();
   private final Map<UUID, Map<Integer, PendingSpawn>> pendingSpawns = new ConcurrentHashMap<>();
   private final Map<UUID, Set<Integer>> hiddenEntityIds = new ConcurrentHashMap<>();
@@ -95,6 +96,7 @@ public class PacketHider {
   public PacketHider(RevealManager revealManager) {
     this.revealManager = revealManager;
     this.registry = new BlockIdRegistry();
+    this.audit = new PacketAuditManager(revealManager.plugin());
     revealManager.setChunkRevealCallback(this::resendSpawnsForChunk);
     DeepslateProtection deepslate = new DeepslateProtection(revealManager, registry);
     AmethystProtection amethyst = new AmethystProtection(revealManager, registry);
@@ -205,9 +207,11 @@ public class PacketHider {
         + " amethyst states (" + v + ")");
     listener = new Listener();
     PacketEvents.getAPI().getEventManager().registerListener(listener);
+    audit.start();
   }
 
   public void unregister() {
+    audit.stop();
     if (listener != null) {
       PacketEvents.getAPI().getEventManager().unregisterListener(listener);
       listener = null;
@@ -221,11 +225,17 @@ public class PacketHider {
   }
 
   public void reload() {
+    audit.reload();
+    audit.start();
     ClientVersion v = PacketEvents.getAPI().getServerManager().getVersion().toClientVersion();
     registry.rebuild(v);
     LogData.get().info("[hider] reloaded block registry - "
         + registry.amethystCount() + " amethyst, " + registry.oreCount()
         + " ore states (" + v + ")");
+  }
+
+  public PacketAuditManager audit() {
+    return audit;
   }
 
   public void setGhostBlockManager(
@@ -262,10 +272,16 @@ public class PacketHider {
         return;
       }
       try {
-        var handler = handlers.get(event.getPacketType());
+        var type = event.getPacketType();
+        var handler = handlers.get(type);
+        boolean handled = handler != null;
         if (handler != null) {
           handler.accept(event, player);
         }
+        if (!event.isCancelled() && audit.shouldBlock(type, handled)) {
+          event.setCancelled(true);
+        }
+        audit.record(type, handled, event.isCancelled());
       } catch (Throwable error) {
         if (failureCount.incrementAndGet() <= 8) {
           LogData.get().warning("[hider] packet handler error ("
