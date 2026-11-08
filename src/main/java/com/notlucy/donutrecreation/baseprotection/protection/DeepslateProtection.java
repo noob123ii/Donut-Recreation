@@ -350,26 +350,30 @@ public final class DeepslateProtection {
       if (state == null || state.getType() == null) {
         return false;
       }
-      String name = state.getType().getName();
-      if (name == null) {
+      String rawName = state.getType().getName();
+      if (rawName == null) {
         return false;
       }
-      if ("air".equals(name) || "cave_air".equals(name) || "void_air".equals(name)) {
+      String name = rawName.toLowerCase(java.util.Locale.ROOT);
+      if ("air".equals(name) || "cave_air".equals(name) || "void_air".equals(name)
+          || "light".equals(name)) {
         return false;
       }
-      if (name.contains("leaves")) {
+      if (name.contains("leaves") || name.contains("leaf")) {
         return false;
       }
       if (name.endsWith("_log") || name.endsWith("_wood") || name.equals("log")
-          || name.equals("wood") || name.contains("stem") || name.contains("hyphae")
-          || name.equals("mangrove_roots") || name.equals("muddy_mangrove_roots")) {
+          || name.equals("wood") || name.contains("stripped") && (name.contains("log") || name.contains("wood") || name.contains("stem") || name.contains("hyphae"))
+          || name.contains("stem") || name.contains("hyphae")
+          || name.equals("mangrove_roots") || name.equals("muddy_mangrove_roots")
+          || name.equals("bamboo_block") || name.equals("stripped_bamboo_block")) {
         return false;
       }
       if (name.contains("vine") || name.contains("sapling") || name.contains("propagule")
-          || name.contains("azalea") && !name.contains("azalea_leaves")
+          || (name.contains("azalea") && !name.contains("leaves"))
           || name.equals("bee_nest") || name.equals("beehive")
           || name.equals("mushroom_stem") || name.contains("mushroom_block")
-          || name.equals("cocoa")) {
+          || name.equals("cocoa") || name.equals("bamboo")) {
         return false;
       }
       return true;

@@ -658,14 +658,15 @@ public class RevealManager {
     }
     if (name.endsWith("_LOG") || name.endsWith("_WOOD") || "MANGROVE_ROOTS".equals(name)
         || "MUDDY_MANGROVE_ROOTS".equals(name) || name.contains("STEM")
-        || name.contains("HYPHAE")) {
+        || name.contains("HYPHAE") || "BAMBOO_BLOCK".equals(name)
+        || "STRIPPED_BAMBOO_BLOCK".equals(name)) {
       return false;
     }
     if (name.contains("VINE") || name.endsWith("_SAPLING") || name.equals("MANGROVE_PROPAGULE")
-        || name.contains("AZALEA") && !name.contains("LEAVES")
+        || (name.contains("AZALEA") && !name.contains("LEAVES"))
         || "BEE_NEST".equals(name) || "BEEHIVE".equals(name)
         || "COCOA".equals(name) || "MUSHROOM_STEM".equals(name)
-        || name.contains("MUSHROOM_BLOCK")) {
+        || name.contains("MUSHROOM_BLOCK") || "BAMBOO".equals(name)) {
       return false;
     }
     return true;
