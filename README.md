@@ -1,269 +1,223 @@
-# Donut Recreation
+<p align="center">
+  <h1 align="center">Donut Recreation</h1>
+  <p align="center">A Paper plugin that brings Donut SMP-style anti-cheat tools, base hiding, and staff utilities to your own server.</p>
+</p>
 
-PaperMC plugin that recreates Donut SMP's anti-cheat toolkit on your own server.
-
-Anti-freecam / anti-xray base hider with two-tier masking, geode hiding, a `/acsus` review GUI
-fed by behavioural tracking plus flag hooks for Vulcan, Matrix, GrimAC, NoCheatPlus and AAC,
-a punishment system with alt-evasion detection and configurable full-screen ban messages, and
-`/spawnfake` decoys. Client-side trickery done via
-[PacketEvents](https://github.com/retrooper/packetevents) — the real world on disk is
-never touched.
-
-Tested on **Paper 26.3** (build 237) and **PacketEvents 2.14.0**. Requires **Java 25**.
+<p align="center">
+  <img src="https://img.shields.io/badge/Paper-1.20.4%2B-2ea44f?style=flat-square" alt="Paper 1.20.4+">
+  <img src="https://img.shields.io/badge/Java-21%2B-ed8b00?style=flat-square" alt="Java 21+">
+  <img src="https://img.shields.io/badge/PacketEvents-2.14.0-5b6ee1?style=flat-square" alt="PacketEvents 2.14.0">
+</p>
 
 ---
 
-## Commands
+Donut Recreation is a set of server-side tools built around packet-level hiding and moderation. The main idea is simple: stop freecam/x-ray style base finding without messing with the real world on disk. Chunk and block data is rewritten on the wire (via [PacketEvents](https://github.com/retrooper/packetevents)), so players see a masked view while the actual world stays untouched.
 
-### `/acsus [player] [reason]`
-Chest GUI listing all flagged players. Click a head to spectate that player. No category
-layer — goes straight to the player list. Behaviour tracker flags sustained elytra flights,
-mining bursts, macro-like repetition, and anti-cheat plugin flags in the background.
+It also includes a suspicion review GUI (`/acsus`) that can pull in flags from common anti-cheats, plus punishments, alt-evasion checks, staff mode, and `/spawnfake` decoys.
 
-Anti-cheat detection notifications are broadcast to staff in the format:
-`[Matrix] PlayerName: hack reason (N flags)`
+> Tested on Paper 1.21.11 and 26.3. Targets `api-version` 1.20.4, so it should run on Paper 1.20.4+ with Java 21+.
 
-The hook manager knows Vulcan, Matrix, GrimAC, NoCheatPlus, AAC, Spartan, Verus,
-Intave, Polar, Karhu, Kauri, Reflex, Horizon, Themis, Medusa, Artemis, Dusk, Echo and
-Errata. It also scans every installed plugin jar for Bukkit flag/violation/alert events,
-so custom anti-cheats are discovered automatically. Each player's GUI head shows the
-per-anti-cheat flag counts as well as the total.
+<details>
+<summary><b>What’s in the box</b></summary>
 
-Custom hooks can be declared when a plugin uses unusual event names:
+- **Base hider** — masks blocks below the configured floor and scrambles the surface while players are underground, so bases are hard to spot from below or with freecam.
+- **Ore/geode hiding** — ore visibility is handled through packet checks, and amethyst/geode materials are masked until they should be visible.
+- **Packet filtering** — rewrites chunk data, block changes, block entities, light/sign/debug-related packets, and filters a bunch of entity/world packets that can leak info.
+- **`/acsus` review** — GUI for flagged players with spectate-on-click. Hooks into behavior tracking and known anti-cheat plugins (and can discover custom flag events).
+- **Punishments** — `/offend`, `/unban`, `/unwipe`, configurable ban screen, Ban IDs, optional data wipes, and LuckPerms mute support.
+- **Alt checks** — flags or auto-bans accounts that share an IP with banned players, depending on your policy.
+- **Staff tools** — `/staffmode` (command whitelist + a few view helpers) and `/spawnfake` for ghost stashes/spawners/NPC decoys.
 
-```yaml
-acsus:
-  custom-anticheats:
-    MyAC:
-      event-class: com.example.MyACFlagEvent
-      category: myac
-      name: MyAC
-      reason-methods:
-        - getCheck
-        - getViolations
-```
+</details>
 
-While spectating, a leash task re-teleports you to the target every 10 ticks if they get
-further than 100 blocks away, so the suspect can't shake the review.
+<details open>
+<summary><b>Getting started</b></summary>
 
-### `/offend <player> <reason>` (alias `/punish`)
-Bans and optionally wipes player data. Reasons defined in `config.yml` under `punishments:`.
-Each ban gets a unique **Ban ID** (e.g. `BAN-1234`) that never repeats. Online players are
-kicked instantly with the full-screen ban message; the same screen shows on every rejoin
-attempt. Kick messages show time remaining instead of an expiry date. Bans stored in
-`playerdata.db` for alt-detection. OP-only.
+### Install
 
-### `/unban <player>`
-Unbans a player and clears their evader flag. OP-only.
+1. Build the plugin (see below) or grab `DonutRecreation.jar` from `build/libs/`.
+2. Drop the jar into your server’s `plugins/` folder.
+3. Start the server once to generate `config.yml`.
+4. Stop the server, tweak the config, then start it again.
+5. Make sure staff accounts have the permissions/OP access you expect.
 
-### `/unwipe <player>`
-Unwipes a player — removes their ban and resets their data. OP-only.
+The jar shades its PaperLib/PacketEvents dependencies, so you don’t need to install PacketEvents separately.
 
-### `/spawnfake <stash|spawner|player|bedrockspawner|clear>`
-Spawns ephemeral ghost-blocks and NPCs. Requires staffmode.
-- `stash [template]` — ghost stash room from a template in `plugins/DonutRecreation/stashes/`
-  (`.yml` templates; `.litematic` and `.mcfunction` files are auto-converted on load)
-- `spawner` — ghost spawner where you're looking
-- `player` — 10-second NPC standing in front of you
-- `bedrockspawner` — spawner setup at y=63 with a fake player
-- `clear` — despawns all of your ghost blocks, fake players and decoys
+### Build
 
-### `/staffmode [hidename|hideskin|showtps]`
-Toggles staff mode. Blocks non-whitelisted commands while active. Required for `/spawnfake`.
-Action bar shows green "Staffmode: Enabled" or red "Staffmode: Disabled" on toggle.
-- `hidename` — hide other players' nametags from you (server-side teams trick)
-- `hideskin` — hide other players' skins from you
-- `showtps` — toggles a live TPS/ping display in the action bar for staff
-
-### `/donut reload`
-Reloads config without restart. Works from both console and in-game. OP-only.
-
-### `/donut chunk generate <border>`
-Generates a chunk border. OP-only.
-
----
-
-## Base Hider
-
-Rewrites chunk data on the wire so freecam/x-ray clients see noise instead of your base.
-Not a traditional ore-obfuscator — masks everything below a configurable Y-level.
-
-**Two-tier barrier:**
-- Lower (`hide-below-y`): everything below masked as procedural deepslate/tuff/stone noise.
-  Revealed only when a player is physically in that chunk with line-of-sight (cave flood-fill).
-- Upper (`barrier-upper-y`): the band between lower and upper is masked while the player
-  is above the upper threshold. Set equal to hide-below-y to disable.
-
-**Geode hiding:** Every amethyst-family block is masked: amethyst blocks, budding amethyst,
-clusters, buds, calcite, and smooth basalt. Geodes stay fully invisible even in revealed
-chunks, visible caves, and the player's current chunk. The scan covers the full geode height
-range and uses a versioned cache, so old partial scans are rescanned. Fake geode decoys are
-disabled by default and can be re-enabled with `hider.fake-geode-amethyst-per-chunk`.
-
-**Spawner masking:** Spawners above the floor are replaced with deepslate and cannot be broken.
-
-**Tile-entity masking:** Chests, shulkers, hoppers, spawners below the barrier sent as
-AIR until the viewer is within render distance.
-
-**Sound & particle dampers:** Certain sounds/particles that leak hidden chunk data are
-suppressed or re-spatialised.
-
-**Cave volume reveal:** The chunk you are in and the surrounding chunk area are fully
-revealed below the floor so mining and base finding work normally. Other chunks use a
-bounded cave-volume fill and surface detection, so caves behind walls or outside the radius
-stay masked. The visible layer above the floor is included, and revealed cave and barrier
-blocks stay visible after returning above the floor until their chunk unloads.
-
-**Salt rotation:** Noise pattern is salted per-player and rotates periodically (default
-12,000 ticks). Prevents clients from building a static map of the fake floor.
-
-**Automatic re-masking:** Revealed chunks outside the current reveal area are masked again
-as the player moves away or climbs back above the barrier, so previously seen caves cannot
-be kept visible with a freecam client.
-
-**Masking:** Every viewer sees the masked world below the configured floor; there is no
-client-side bypass permission.
-
-### Packet coverage
-
-Every block-bearing packet is filtered on the wire, including chunk data, light updates,
-single and multi block changes, block entity data, block actions, break animations,
-sign updates, transient blocks, `/debug` block/chunk/entity values and game-test
-highlights. Player-detection vectors are also blocked: locator-bar waypoints, sculk
-vibration signals, spectator camera targets, forced look-at packets, bed packets and damage
-source positions. Entity packets are filtered too: all modern spawn packets (generic, living,
-player, experience orb, painting, weather), position sync / teleport / relative movement,
-metadata, equipment, status, velocity, effects, passengers, NBT and destroy packets.
-Block-entity, sound, particle and explosion packets are masked for unrevealed regions.
-
-### Packet audit
-
-`packet-audit` records every outgoing packet type seen by the server, classifies each as
-block data, entity data, player data, world event, UI, or other, and reports whether the
-hider handles it and whether it was blocked. New packet types are logged once. Use
-`/donut packets` for the current report and `/donut packets clear` to reset counters.
-Entries in `packet-audit.blocked-packets` always cancel matching packet names.
-`block-unhandled-risky` blocks unhandled block/entity packets automatically.
-
----
-
-## Alt-Evasion
-
-On every join, if the player shares an IP with someone currently banned:
-
-- `strict` — auto-ban the new account for 1 month (requires 5+ banned alts on same IP)
-- `new-accounts-only` — auto-ban only if the account is younger than `alt-ban-account-min-age-hours` or has never joined from that IP before (default)
-- `flag-only` — never auto-ban, only flag
-
-Below the threshold, alts are flagged and staff are notified.
-
----
-
-## Punishment System
-
-Punishments are configured in `config.yml` under `punishments:`. Each reason supports:
-- `BanTime` — ban duration (e.g. `1d`, `1mo`, `lifetime`)
-- `MuteTime` — mute duration via LuckPerms (e.g. `10m`, `1h`)
-- `ResetData` — wipe inventory, ender chest, and stats on punish
-
-Ban records are stored with a unique Ban ID that can be used to link accounts.
-Time is shown as remaining duration (e.g. "2d 5h 30m") rather than an expiry date.
-
-The ban screen is fully configurable via the top-level `ban-message` key in `config.yml`
-(default below). Placeholders: `%reason%`, `%duration%`, `%time_remaining%`, `%ban_id%`:
-
-```
-&c&lYOU ARE BANNED
-
-&7Reason: &f%reason%
-&7Duration: &f%duration%
-&7Time remaining: &f%time_remaining%
-&7Ban ID: &f%ban_id%
-
-&7Appeal at &fhttps://dc.cloudmc.lol/
-```
-
-With `ResetData: true`, economy balances from CoinsEngine are reset to the values under
-`punishments.new-player-balances` (or zeroed) and ender chests from VariableEnderChests are
-cleared, in addition to the vanilla inventory and stats wipe.
-
----
-
-## Installation
-
-1. Drop `DonutRecreation.jar` from `build/libs/` into `plugins/`
-2. Start the server once to generate `config.yml`
-3. Stop, edit the config, start again
-4. Make sure staff players are OP
-
-The plugin shadows PaperLib and PacketEvents into its own jar.
-
-## Building
-
-```
+```bash
 ./gradlew shadowJar
+```
+
+On Windows:
+
+```bat
+gradlew.bat shadowJar
 ```
 
 Output: `build/libs/DonutRecreation.jar`
 
+### Local test server (this repo)
+
+This checkout includes scripts for a local Paper test server in `server/` (gitignored):
+
+```bat
+start-server.bat
+```
+
+```powershell
+.\start-server.ps1
+```
+
+More notes are in [`SERVER.md`](SERVER.md).
+
+</details>
+
+<details>
+<summary><b>Commands</b></summary>
+
+| Command | What it does | Access |
+|---|---|---|
+| `/acsus [player] [reason]` | Opens the suspicion GUI (or marks a player). Click a head to spectate. | Staff/alerts |
+| `/offend <player> <reason>` | Punishes a player using a configured reason. Alias: `/punish`. | OP |
+| `/unban <player>` | Removes a ban and clears the evader flag. | OP |
+| `/unwipe <player>` | Unwipes/removes ban data for a player. | OP |
+| `/spawnfake <stash\|spawner\|player\|bedrockspawner\|clear>` | Spawns/despawns ghost decoys and fake NPCs. Requires staff mode. | Staff mode |
+| `/staffmode [hidename\|hideskin\|showtps]` | Toggles staff mode and related view options. | Staff |
+| `/donut reload` | Reloads config. | OP |
+| `/donut xray [rescan]` | Shows hider status and can re-apply the surface scramble across loaded chunks. | OP |
+| `/donut chunk generate <border>` | Generates a chunk border. | OP |
+| `/donut packets [clear]` | Shows/resets packet audit counters (if enabled). | OP |
+
+Notes:
+- `/acsus` is backed by behavior tracking and anti-cheat hooks (Vulcan, Matrix, GrimAC, NCP, AAC, Spartan, Verus, Intave, Polar, Karhu, Kauri, Reflex, Horizon, Themis, Medusa, Artemis, Dusk, Echo, Errata, plus jar-scanned/custom hooks).
+- While spectating, the plugin keeps you close to the target so they can’t just run you out of range.
+- `/spawnfake stash` loads templates from `plugins/DonutRecreation/stashes/` (`.yml`, and it can auto-convert `.litematic`/`.mcfunction` on load).
+
+</details>
+
+<details>
+<summary><b>How the base hider works</b></summary>
+
+The base hider rewrites outgoing packets — it doesn’t edit the world. The goal is to make underground/surface base finding with freecam or x-ray clients unreliable.
+
+### Masking layers
+
+- **Below `hider.hide-below-y`** — masked with procedural noise (deepslate/tuff/stone-style cover). Areas are revealed based on where the player actually is (cave/visibility logic), not just chunk ownership.
+- **Barrier band (`hide-below-y` → `barrier-upper-y`)** — adds an upper masked band. Set both to the same value to disable the band.
+- **Surface scramble (while underground)** — when a player drops below `hider.scramble-below-y` and stays in that locked state (until above `hider.scramble-until-above-y`), the plugin masks the surface band from `barrier-upper-y` up to `hider.surface-scramble-max-y`.
+
+### Current surface scramble behavior
+
+When the surface scramble is active, the masked surface band is sent as a **flat fake shell** instead of solid fill:
+
+- blocks **above** the fake surface level become **air**
+- the fake surface level becomes a **stone** layer
+- blocks **below** that fake surface (within the band) become **air**
+
+That keeps the real terrain/builds hidden and makes the surface look intentionally “off”. Real underground terrain/ores aren’t the target of that surface band; mining visibility is handled by the reveal logic.
+
+### Other hiding behavior
+
+- **Geodes/amethyst** — amethyst-family blocks (buds, clusters, calcite, smooth basalt, etc.) are masked/handled so geodes don’t give away hidden areas. Fake geode decoys are off by default (`hider.fake-geode-amethyst-per-chunk`).
+- **Spawners** — spawners can be masked above the configured floor and handled carefully around reveal distance.
+- **Tile entities** — containers/spawners/etc. below protected areas can be sent as air until they’re legitimately visible.
+- **Cave reveal** — nearby chunks/cave volume can be revealed progressively so normal mining still works, while distant/occluded areas stay masked.
+- **Salt rotation** — per-player noise patterns rotate over time so clients can’t build a stable map of the fake terrain.
+- **Re-masking** — chunks outside the active reveal area get masked again as players move away.
+
+### Packet coverage (high level)
+
+The plugin filters more than just `CHUNK_DATA`: light updates, block changes, multi-block changes, block entity data, block actions/break animations, sign updates, debug packets, and a range of entity/world packets that can leak positions (spawns, movement/sync, metadata, equipment, passengers, effects, damage/camera/look/bed-related packets, etc.). Sounds/particles/explosions can also be dampened or adjusted for hidden regions.
+
+There’s also an optional packet audit (`packet-audit.*`) to log/classify outgoing packet types and optionally block risky unhandled ones. `/donut packets` shows the report.
+
+</details>
+
+<details>
+<summary><b>Punishments & alt handling</b></summary>
+
+### Punishments
+
+Punishment reasons live under `punishments:` in `config.yml`. Each reason can define things like:
+
+- `BanTime` (e.g. `1d`, `1mo`, `lifetime`)
+- `MuteTime` (LuckPerms)
+- `ResetData` (wipe inventory/ender chest/stats; can also reset supported economy balances)
+
+Bans get a unique **Ban ID** (like `BAN-1234`) and are stored in `playerdata.db`. The ban screen is configurable with `ban-message` and supports placeholders like `%reason%`, `%duration%`, `%time_remaining%`, and `%ban_id%`.
+
+### Alt-evasion
+
+On join, the plugin checks whether the player shares an IP with banned accounts. Behavior is controlled by `alt-ban-policy`:
+
+- `strict` — auto-ban new accounts after the threshold is met
+- `new-accounts-only` — auto-ban only for young/new-to-that-IP accounts (default)
+- `flag-only` — never auto-ban, just alert/flag
+
+Tune with `alt-ban-threshold` and `alt-ban-account-min-age-hours`.
+
+</details>
+
+<details>
+<summary><b>Configuration</b></summary>
+
+Most behavior is configured in `plugins/DonutRecreation/config.yml`. A few keys you’ll probably touch first:
+
+- `hider.hide-below-y` / `hider.barrier-upper-y` — main masking thresholds
+- `hider.surface-scramble-enabled`, `hider.surface-scramble-max-y`, `hider.surface-scramble-radius` — surface hiding while underground
+- `hider.scramble-below-y` / `hider.scramble-until-above-y` — lock/unlock hysteresis
+- `hider.flood-fill-budget`, `hider.max-revealed-chunks-per-player` — cave reveal vs CPU/memory tradeoff
+- `hider.max-reveal-per-recompute`, `hider.max-hide-per-recompute` — packet work limits per update
+- `punishments.*` and `ban-message` — punishment reasons and ban screen
+- `alt-ban-policy`, `alt-ban-threshold`, `alt-ban-account-min-age-hours` — alt handling
+- `acsus.custom-anticheats` — custom anti-cheat event hooks
+- `packet-audit.*` — outgoing packet auditing/blocking options
+
+If you change chunk/hider behavior, restart the server and reconnect clients (don’t rely on `/reload` for chunk packet changes). `/donut xray rescan` can help re-apply the surface scramble to loaded chunks.
+
+</details>
+
+<details>
+<summary><b>Data files</b></summary>
+
+The plugin stores runtime data under `plugins/DonutRecreation/`, including:
+
+- `config.yml` — main config
+- `playerdata.db` — bans, player profiles, and IP history/index
+- `geode-cache/` — geode scan/position cache
+- `skins.yml` — captured skins for staff/fake player features
+- `stashes/` — stash templates for `/spawnfake stash`
+- `staffdata.yml` — staff mode state
+
+Most data is flushed periodically and on shutdown. Deleting the data files gives you a clean slate (but you’ll lose bans/history/cache).
+
+</details>
+
+<details>
+<summary><b>Troubleshooting</b></summary>
+
+- **Chunks below the floor don’t show up until relog** — try raising `max-reveal-hide-per-recompute` (and check related reveal/hide budgets).
+- **Geodes look partly visible/masked weirdly** — double-check `hide-below-y` and geode cache behavior; old cache data may need a clean rescan depending on changes.
+- **Lag spikes in caves** — lower `flood-fill-budget` and/or `max-revealed-chunks-per-player`.
+- **Surface hiding looks stale after config changes** — restart the server, reconnect, and use `/donut xray rescan` if needed.
+
+</details>
+
 ---
 
-## Configuration
+## Bugs / feedback
 
-`plugins/DonutRecreation/config.yml` — see the file for all options. Key ones:
+If something breaks, open an issue and include:
 
-- `hider.hide-below-y` / `hider.barrier-upper-y` — barrier thresholds
-- `hider.flood-fill-budget` — lower for less CPU, raise for better cave reveal
-- `hider.max-revealed-chunks-per-player` — memory vs coverage tradeoff
-- `hider.max-reveal-per-recompute` / `hider.max-hide-per-recompute` — packet budget per
-  update; keeps large reveals/masks from causing a tick spike
-- `punishments:` — reason/duration/data-wipe per offence type
-- `ban-message` — ban screen template (`%reason%`, `%duration%`, `%time_remaining%`, `%ban_id%`)
-- `alt-ban-policy` — strict / new-accounts-only / flag-only
-- `alt-ban-threshold` — minimum banned alts on same IP before auto-ban (default 5)
+- your Paper version (`/version Paper`)
+- the relevant part of `config.yml`
+- server logs around the issue
 
----
-
-## Data Files
-
-Single YAML database at `plugins/DonutRecreation/playerdata.db`:
-- `bans:` — all bans with Ban ID, reason, time remaining, IP, evader flag
-- `profiles:` — per-UUID join history, client brand, IPs
-- `ips:` — reverse index from IP to UUIDs
-
-Geode data cached in `plugins/DonutRecreation/geode-cache/`:
-- `scanned.dat` — which chunks have been scanned
-- `geodes.dat` — stored geode positions
-
-Captured player skins for `/staffmode hideskin` and fake players stored in `skins.yml`.
-Stash templates loaded from `plugins/DonutRecreation/stashes/` (see `/spawnfake`).
-
-Staff mode state persisted in `plugins/DonutRecreation/staffdata.yml`.
-
-Flushed async every ~10 seconds and on disable. Safe to delete for a clean slate.
-
----
-
-## Troubleshooting
-
-**Chunks below floor don't load until relog** — raise `max-reveal-hide-per-recompute`.
-
-**Geodes look partially covered** — check that `hide-below-y` is set correctly. Geode blocks
-below it mask as deepslate, above as stone.
-
-**Lag spikes in caves** — lower `flood-fill-budget` and `max-revealed-chunks-per-player`.
-
----
-
-## Bugs
-
-Ping **!Lucy** on Discord. Open a GitHub issue with:
-- Paper version (`/version Paper`)
-- Relevant `config.yml` section
-- Server log around the event
-
----
+You can also ping **!Lucy** on Discord if that’s the support route you’re using.
 
 ## License
 
-See `LICENSE`. Recreation/learning project — not copied from the original Donut SMP codebase.
+See [`LICENSE`](LICENSE).
+
+This is a recreation/learning project and isn’t copied from the original Donut SMP codebase.
