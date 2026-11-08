@@ -16,6 +16,7 @@
  */
 package com.notlucy.donutrecreation.baseprotection.protection;
 
+import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -198,18 +199,12 @@ public final class DeepslateProtection {
       if (revealManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
         return false;
       }
-      int heightmapY = Integer.MIN_VALUE;
-      try {
-        if (player.getWorld().isChunkLoaded(chunkX, chunkZ)) {
-          heightmapY = player.getWorld().getHighestBlockYAt(x, z);
-        }
-      } catch (Throwable ignored) {
-      }
-      if (y > heightmapY) {
+      int flatY = chunkFlatYFromWorld(player.getWorld(), chunkX, chunkZ, salt);
+      if (y > flatY) {
         wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.airId()));
         return true;
       }
-      if (y == heightmapY) {
+      if (y == flatY) {
         wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.stoneId()));
         return true;
       }
@@ -262,21 +257,24 @@ public final class DeepslateProtection {
     if (bandEnd <= bandStart) {
       return;
     }
+    int chunkX = worldOriginX >> 4;
+    int chunkZ = worldOriginZ >> 4;
+    int flatY = chunkFlatYFromPacket(allSections, minSection, chunkX, chunkZ, salt,
+        bandStart, bandEnd - 1);
     for (int x = 0; x < 16; x++) {
       int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = worldOriginZ + z;
-        int heightmapY = findHeightmap(allSections, minSection, x, z, bandStart, bandEnd - 1);
         for (int y = lowY; y < highY; y++) {
           int worldY = worldOriginY + y;
           if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
             continue;
           }
-          if (worldY > heightmapY) {
+          if (worldY > flatY) {
             if (section.getBlockId(x, y, z) != airId) {
               section.set(x, y, z, airId);
             }
-          } else if (worldY == heightmapY) {
+          } else if (worldY == flatY) {
             section.set(x, y, z, stoneId);
           }
         }
@@ -284,7 +282,44 @@ public final class DeepslateProtection {
     }
   }
 
-  private int findHeightmap(
+  private int chunkFlatYFromPacket(BaseChunk[] sections, int minSection, int chunkX, int chunkZ,
+      int salt, int worldMin, int worldMax) {
+    int mix = sampleMix(chunkX, chunkZ, salt);
+    int sx = mix & 15;
+    int sz = (mix >>> 4) & 15;
+    return findTerrainHeightmap(sections, minSection, sx, sz, worldMin, worldMax);
+  }
+
+  private int chunkFlatYFromWorld(org.bukkit.World world, int chunkX, int chunkZ, int salt) {
+    int mix = sampleMix(chunkX, chunkZ, salt);
+    int sx = mix & 15;
+    int sz = (mix >>> 4) & 15;
+    int x = (chunkX << 4) + sx;
+    int z = (chunkZ << 4) + sz;
+    try {
+      if (world.isChunkLoaded(chunkX, chunkZ)) {
+        return world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
+      }
+    } catch (Throwable ignored) {
+      try {
+        if (world.isChunkLoaded(chunkX, chunkZ)) {
+          return world.getHighestBlockYAt(x, z);
+        }
+      } catch (Throwable ignored2) {
+      }
+    }
+    return Math.max(world.getMinHeight(), revealManager.surfaceScrambleStartY());
+  }
+
+  private static int sampleMix(int chunkX, int chunkZ, int salt) {
+    int hash = (chunkX * 73428767 ^ chunkZ * 912367) + (salt * 0x45D9F3B);
+    hash ^= (hash >>> 16);
+    hash *= 0x45D9F3B;
+    hash ^= (hash >>> 16);
+    return hash;
+  }
+
+  private int findTerrainHeightmap(
       BaseChunk[] sections, int minSection, int localX, int localZ,
       int worldMin, int worldMax) {
     for (int worldY = worldMax; worldY >= worldMin; worldY--) {
@@ -298,16 +333,16 @@ public final class DeepslateProtection {
         return worldY;
       }
       int id = section.getBlockId(localX, worldY & 15, localZ);
-      if (!isAirPacketId(id)) {
+      if (isTerrainForHeightmap(id)) {
         return worldY;
       }
     }
     return worldMin;
   }
 
-  private boolean isAirPacketId(int globalId) {
+  private boolean isTerrainForHeightmap(int globalId) {
     if (globalId == blockIds.airId()) {
-      return true;
+      return false;
     }
     try {
       WrappedBlockState state = WrappedBlockState.getByGlobalId(
@@ -316,9 +351,30 @@ public final class DeepslateProtection {
         return false;
       }
       String name = state.getType().getName();
-      return "air".equals(name) || "cave_air".equals(name) || "void_air".equals(name);
+      if (name == null) {
+        return false;
+      }
+      if ("air".equals(name) || "cave_air".equals(name) || "void_air".equals(name)) {
+        return false;
+      }
+      if (name.contains("leaves")) {
+        return false;
+      }
+      if (name.endsWith("_log") || name.endsWith("_wood") || name.equals("log")
+          || name.equals("wood") || name.contains("stem") || name.contains("hyphae")
+          || name.equals("mangrove_roots") || name.equals("muddy_mangrove_roots")) {
+        return false;
+      }
+      if (name.contains("vine") || name.contains("sapling") || name.contains("propagule")
+          || name.contains("azalea") && !name.contains("azalea_leaves")
+          || name.equals("bee_nest") || name.equals("beehive")
+          || name.equals("mushroom_stem") || name.contains("mushroom_block")
+          || name.equals("cocoa")) {
+        return false;
+      }
+      return true;
     } catch (Throwable ignored) {
-      return false;
+      return true;
     }
   }
 

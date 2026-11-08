@@ -34,6 +34,7 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import org.bukkit.Bukkit;
 import org.bukkit.Chunk;
 import org.bukkit.ChunkSnapshot;
+import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -621,6 +622,55 @@ public class RevealManager {
     return Math.abs(dx) <= radius && Math.abs(dz) <= radius;
   }
 
+  private int chunkFlatY(ChunkSnapshot snapshot, World world, int chunkX, int chunkZ, int salt) {
+    int hash = (chunkX * 73428767 ^ chunkZ * 912367) + (salt * 0x45D9F3B);
+    hash ^= (hash >>> 16);
+    hash *= 0x45D9F3B;
+    hash ^= (hash >>> 16);
+    int sx = hash & 15;
+    int sz = (hash >>> 4) & 15;
+    int maxY = Math.min(snapshot.getHighestBlockYAt(sx, sz), world.getMaxHeight() - 1);
+    int minY = Math.max(world.getMinHeight(), surfaceScrambleStartY());
+    for (int y = maxY; y >= minY; y--) {
+      try {
+        Material type = snapshot.getBlockData(sx & 15, y, sz & 15).getMaterial();
+        if (isTerrainForHeightmap(type)) {
+          return y;
+        }
+      } catch (Throwable ignored) {
+        return y;
+      }
+    }
+    try {
+      return snapshot.getHighestBlockYAt(sx, sz);
+    } catch (Throwable ignored) {
+      return Math.max(world.getMinHeight(), surfaceScrambleStartY());
+    }
+  }
+
+  private static boolean isTerrainForHeightmap(Material material) {
+    if (material == null || material.isAir()) {
+      return false;
+    }
+    String name = material.name();
+    if (name.contains("LEAVES")) {
+      return false;
+    }
+    if (name.endsWith("_LOG") || name.endsWith("_WOOD") || "MANGROVE_ROOTS".equals(name)
+        || "MUDDY_MANGROVE_ROOTS".equals(name) || name.contains("STEM")
+        || name.contains("HYPHAE")) {
+      return false;
+    }
+    if (name.contains("VINE") || name.endsWith("_SAPLING") || name.equals("MANGROVE_PROPAGULE")
+        || name.contains("AZALEA") && !name.contains("LEAVES")
+        || "BEE_NEST".equals(name) || "BEEHIVE".equals(name)
+        || "COCOA".equals(name) || "MUSHROOM_STEM".equals(name)
+        || name.contains("MUSHROOM_BLOCK")) {
+      return false;
+    }
+    return true;
+  }
+
   /** Records a chunk whose surface was masked during a CHUNK_DATA rewrite. */
   public void recordSurfaceMaskedChunk(Player player, int chunkX, int chunkZ) {
     if (!surfaceScrambleEnabled || player == null) {
@@ -669,36 +719,34 @@ public class RevealManager {
     final int batchSize = 4096;
     Map<Location, BlockData> batch = new HashMap<>(batchSize);
     int n = 0;
+    int salt = getPlayerSalt(playerId);
+    int flatY = chunkFlatY(snapshot, world, chunkX, chunkZ, salt);
     for (int x = 0; x < 16; x++) {
       int worldX = baseX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = baseZ + z;
-        int heightmapY;
-        try {
-          heightmapY = snapshot.getHighestBlockYAt(x & 15, z & 15);
-        } catch (Throwable ignored) {
-          heightmapY = world.getMinHeight();
-        }
         for (int y = fromY; y < toY; y++) {
           if (checkGhosts
               && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
             continue;
           }
-          BlockData data = null;
+          BlockData data;
           if (mask) {
-            if (y > heightmapY) {
+            if (y > flatY) {
               data = airBlock;
-            } else if (y == heightmapY) {
+            } else if (y == flatY) {
               data = stoneBlock;
+            } else {
+              data = snapshot.getBlockData(x & 15, y, z & 15);
+              if (isGeodeMaterial(data.getMaterial())) {
+                data = maskBlock;
+              }
             }
           } else {
             data = snapshot.getBlockData(x & 15, y, z & 15);
             if (isGeodeMaterial(data.getMaterial())) {
               data = maskBlock;
             }
-          }
-          if (data == null) {
-            continue;
           }
           batch.put(new Location(world, worldX, y, worldZ), data);
           if (++n >= batchSize) {

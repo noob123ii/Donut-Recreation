@@ -18,6 +18,7 @@ package com.notlucy.donutrecreation.baseprotection.renderering;
 
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
+import org.bukkit.HeightMap;
 import org.bukkit.entity.Player;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
@@ -64,6 +65,8 @@ public final class MultiBlockChangeHandler {
     boolean surfaceLocked = revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ);
     int surfaceTop = Math.min(player.getWorld().getMaxHeight(),
         revealManager.surfaceScrambleMaxY());
+    int chunkFlatY = (maskBase && surfaceLocked) ? chunkFlatY(player, chunkX, chunkZ, salt)
+        : Integer.MIN_VALUE;
     int floorFixes = 0, spawnerFixes = 0;
     int spawnerId = deepslate.spawnerId();
 
@@ -78,20 +81,13 @@ public final class MultiBlockChangeHandler {
       boolean surfaceBand = maskBase && surfaceLocked
           && blockY >= revealManager.surfaceScrambleStartY() && blockY < surfaceTop;
       if (surfaceBand) {
-        int heightmapY = Integer.MIN_VALUE;
-        try {
-          if (player.getWorld().isChunkLoaded(blockX >> 4, blockZ >> 4)) {
-            heightmapY = player.getWorld().getHighestBlockYAt(blockX, blockZ);
-          }
-        } catch (Throwable ignored) {
-        }
-        if (blockY > heightmapY) {
+        if (blockY > chunkFlatY) {
           int want = deepslate.airId();
           if (encodedBlock.getBlockId() != want) {
             encodedBlock.setBlockId(want);
             floorFixes++;
           }
-        } else if (blockY == heightmapY) {
+        } else if (blockY == chunkFlatY) {
           int want = deepslate.stoneId();
           if (encodedBlock.getBlockId() != want) {
             encodedBlock.setBlockId(want);
@@ -137,5 +133,29 @@ public final class MultiBlockChangeHandler {
       event.markForReEncode(true);
     }
     return touched;
+  }
+
+  private int chunkFlatY(Player player, int chunkX, int chunkZ, int salt) {
+    int hash = (chunkX * 73428767 ^ chunkZ * 912367) + (salt * 0x45D9F3B);
+    hash ^= (hash >>> 16);
+    hash *= 0x45D9F3B;
+    hash ^= (hash >>> 16);
+    int sx = hash & 15;
+    int sz = (hash >>> 4) & 15;
+    int x = (chunkX << 4) + sx;
+    int z = (chunkZ << 4) + sz;
+    try {
+      if (player.getWorld().isChunkLoaded(chunkX, chunkZ)) {
+        return player.getWorld().getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
+      }
+    } catch (Throwable ignored) {
+      try {
+        if (player.getWorld().isChunkLoaded(chunkX, chunkZ)) {
+          return player.getWorld().getHighestBlockYAt(x, z);
+        }
+      } catch (Throwable ignored2) {
+      }
+    }
+    return Math.max(player.getWorld().getMinHeight(), revealManager.surfaceScrambleStartY());
   }
 }
