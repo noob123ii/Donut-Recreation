@@ -218,6 +218,8 @@ You can also ping **!Lucy** on Discord if that’s the support route you’re us
 
 ## License
 
-See [`LICENSE`](LICENSE).
+Copyright (C) 2026 Notlucy and Donut Recreation contributors.
 
-This is a recreation/learning project and isn’t copied from the original Donut SMP codebase.
+This project is licensed under the **GNU General Public License v3.0** (or later). See [`LICENSE`](LICENSE) for the full text.
+
+This is a recreation/learning project and isn’t copied from the original Donut SMP codebase. Shaded dependencies keep their own licenses.

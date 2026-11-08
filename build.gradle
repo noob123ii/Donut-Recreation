@@ -26,11 +26,11 @@ if (hasProperty('ver')) {
     }
 }
 
-version = shortVersion ?: '1.0.7'
+version = shortVersion ?: '1.0.8'
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(21)
     }
 }
 
@@ -63,14 +63,14 @@ repositories {
 }
 
 dependencies {
-    compileOnly 'io.papermc.paper:paper-api:26.3.build.237-stable'
+    compileOnly 'io.papermc.paper:paper-api:1.20.4-R0.1-SNAPSHOT'
     compileOnly 'com.github.spotbugs:spotbugs-annotations:4.9.8'
     implementation 'net.luckperms:api:5.4'
     implementation 'io.papermc:paperlib:1.0.8'
     implementation 'com.github.retrooper:packetevents-spigot:2.14.0'
     spotbugsPlugins 'com.h3xstream.findsecbugs:findsecbugs-plugin:1.14.0'
     testCompileOnly 'com.github.spotbugs:spotbugs-annotations:4.9.8'
-    testImplementation 'io.papermc.paper:paper-api:26.3.build.237-stable'
+    testImplementation 'io.papermc.paper:paper-api:1.20.4-R0.1-SNAPSHOT'
     testImplementation 'org.junit.jupiter:junit-jupiter:6.0.3'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher:6.0.3'
 }
@@ -148,3 +148,8 @@ tasks.register('release') {
         }
     }
 }
+
+
+
+
+
