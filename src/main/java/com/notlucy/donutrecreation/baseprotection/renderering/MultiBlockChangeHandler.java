@@ -81,13 +81,15 @@ public final class MultiBlockChangeHandler {
       boolean surfaceBand = maskBase && surfaceLocked
           && blockY >= revealManager.surfaceScrambleStartY() && blockY < surfaceTop;
       if (surfaceBand) {
+        int hideBelow = Math.max(revealManager.surfaceScrambleStartY(),
+            chunkFlatY - Math.max(0, revealManager.surfaceHideDepth()));
         if (blockY > chunkFlatY) {
           int want = deepslate.airId();
           if (encodedBlock.getBlockId() != want) {
             encodedBlock.setBlockId(want);
             floorFixes++;
           }
-        } else if (blockY == chunkFlatY) {
+        } else if (blockY >= hideBelow) {
           int want = deepslate.stoneId();
           if (encodedBlock.getBlockId() != want) {
             encodedBlock.setBlockId(want);

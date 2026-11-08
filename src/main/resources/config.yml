@@ -18,6 +18,19 @@ hider:
   enabled: true
   hide-below-y: 0
   barrier-upper-y: 12
+  # Surface lock hysteresis: going below scramble-below-y arms it, and it stays armed until the
+  # player climbs above scramble-until-above-y. Underground terrain always stays real so mining
+  # works; the surface scramble above only affects the volume above barrier-upper-y.
+  scramble-enabled: true
+  scramble-below-y: 0
+  scramble-until-above-y: 0
+  # While the surface scramble is armed, each chunk is flattened to a terrain heightmap sampled
+  # at a random column: blocks above that level become air, the level and a few blocks below are
+  # replaced with stone, and deeper blocks are left real. The view restores when the lock clears.
+  surface-scramble-enabled: true
+  surface-scramble-max-y: 128
+  surface-scramble-radius: 1
+  surface-hide-depth: 4
   spawner-mask-above-y: 9999
   spawner-reveal-distance: 20
   upper-reveal-radius: 1

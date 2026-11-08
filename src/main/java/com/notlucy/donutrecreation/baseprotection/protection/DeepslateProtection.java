@@ -200,11 +200,13 @@ public final class DeepslateProtection {
         return false;
       }
       int flatY = chunkFlatYFromWorld(player.getWorld(), chunkX, chunkZ, salt);
+      int hideDepth = Math.max(0, revealManager.surfaceHideDepth());
+      int hideBelow = Math.max(revealManager.surfaceScrambleStartY(), flatY - hideDepth);
       if (y > flatY) {
         wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.airId()));
         return true;
       }
-      if (y == flatY) {
+      if (y >= hideBelow) {
         wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.stoneId()));
         return true;
       }
@@ -261,6 +263,8 @@ public final class DeepslateProtection {
     int chunkZ = worldOriginZ >> 4;
     int flatY = chunkFlatYFromPacket(allSections, minSection, chunkX, chunkZ, salt,
         bandStart, bandEnd - 1);
+    int hideDepth = Math.max(0, revealManager.surfaceHideDepth());
+    int hideBelow = Math.max(bandStart, flatY - hideDepth);
     for (int x = 0; x < 16; x++) {
       int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
@@ -274,8 +278,10 @@ public final class DeepslateProtection {
             if (section.getBlockId(x, y, z) != airId) {
               section.set(x, y, z, airId);
             }
-          } else if (worldY == flatY) {
-            section.set(x, y, z, stoneId);
+          } else if (worldY >= hideBelow) {
+            if (section.getBlockId(x, y, z) != stoneId) {
+              section.set(x, y, z, stoneId);
+            }
           }
         }
       }

@@ -124,6 +124,7 @@ public class RevealManager {
   private final boolean surfaceScrambleEnabled;
   private final int surfaceScrambleMaxY;
   private final int surfaceScrambleRadius;
+  private final int surfaceHideDepth;
   private final ConcurrentMap<UUID, Set<Long>> surfaceMaskedChunks = new ConcurrentHashMap<>();
   private final Set<UUID> fullSurfaceMask = ConcurrentHashMap.newKeySet();
   private final ConcurrentMap<UUID, Long> lastSurfaceTransitionMs = new ConcurrentHashMap<>();
@@ -137,12 +138,14 @@ public class RevealManager {
     this.scrambleEnabled   = cfg.getBoolean("hider.scramble-enabled", true);
     this.scrambleBelowY    = cfg.getInt("hider.scramble-below-y", this.floorY);
     this.scrambleUntilAboveY = Math.max(this.scrambleBelowY,
-        cfg.getInt("hider.scramble-until-above-y", 10));
+        cfg.getInt("hider.scramble-until-above-y", 0));
     this.surfaceScrambleEnabled = cfg.getBoolean("hider.surface-scramble-enabled", true);
     this.surfaceScrambleMaxY = Math.max(this.scrambleBelowY + 1,
         cfg.getInt("hider.surface-scramble-max-y", 128));
     this.surfaceScrambleRadius = Math.max(0, Math.min(6,
         cfg.getInt("hider.surface-scramble-radius", 1)));
+    this.surfaceHideDepth = Math.max(0, Math.min(16,
+        cfg.getInt("hider.surface-hide-depth", 4)));
     this.upperRevealRadius = Math.max(1, cfg.getInt("hider.upper-reveal-radius", 1));
     this.worldMinY         = cfg.getInt("hider.world-min-y", -64);
     this.initialRadius     = cfg.getInt("hider.reveal-initial-radius", 3);
@@ -209,6 +212,7 @@ public class RevealManager {
   public boolean surfaceScrambleEnabled() { return surfaceScrambleEnabled; }
   public int surfaceScrambleMaxY() { return surfaceScrambleMaxY; }
   public int surfaceScrambleRadius() { return surfaceScrambleRadius; }
+  public int surfaceHideDepth() { return surfaceHideDepth; }
 
   /** The surface mask starts above the normal barrier band so the band can still reveal. */
   public int surfaceScrambleStartY() { return Math.max(scrambleBelowY, upperY); }
@@ -722,6 +726,7 @@ public class RevealManager {
     int n = 0;
     int salt = getPlayerSalt(playerId);
     int flatY = chunkFlatY(snapshot, world, chunkX, chunkZ, salt);
+    int hideBelow = Math.max(fromY, flatY - Math.max(0, surfaceHideDepth));
     for (int x = 0; x < 16; x++) {
       int worldX = baseX + x;
       for (int z = 0; z < 16; z++) {
@@ -735,7 +740,7 @@ public class RevealManager {
           if (mask) {
             if (y > flatY) {
               data = airBlock;
-            } else if (y == flatY) {
+            } else if (y >= hideBelow) {
               data = stoneBlock;
             } else {
               data = snapshot.getBlockData(x & 15, y, z & 15);
