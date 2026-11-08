@@ -39,6 +39,7 @@ import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.world.ChunkLoadEvent;
 import org.bukkit.event.world.ChunkUnloadEvent;
 
+import com.notlucy.donutrecreation.baseprotection.PlacedBlockHider;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.util.LogData;
 
@@ -59,11 +60,17 @@ public class SpawnListener implements Listener {
       SpawnReason.SILVERFISH_BLOCK);
 
   private final RevealManager revealManager;
+  private final PlacedBlockHider placedBlockHider;
   private final boolean killNaturalSpawns;
   private final boolean killAllUnderFloorSpawns;
 
   public SpawnListener(RevealManager revealManager) {
+    this(revealManager, null);
+  }
+
+  public SpawnListener(RevealManager revealManager, PlacedBlockHider placedBlockHider) {
     this.revealManager = revealManager;
+    this.placedBlockHider = placedBlockHider;
     this.killNaturalSpawns = revealManager.plugin().getConfig()
         .getBoolean("hider.block-natural-spawns-below-hide", true);
     this.killAllUnderFloorSpawns = revealManager.plugin().getConfig()
@@ -90,7 +97,9 @@ public class SpawnListener implements Listener {
 
   @EventHandler(priority = EventPriority.MONITOR)
   public void onChunkLoad(ChunkLoadEvent event) {
-
+    if (placedBlockHider != null) {
+      placedBlockHider.scanChunk(event.getChunk());
+    }
   }
 
   @EventHandler(priority = EventPriority.MONITOR)
@@ -104,6 +113,9 @@ public class SpawnListener implements Listener {
     if (isAmethystBlock(block.getType())) {
       revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
     }
+    if (placedBlockHider != null) {
+      placedBlockHider.untrack(block.getWorld(), block.getX(), block.getY(), block.getZ());
+    }
   }
 
   @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
@@ -111,6 +123,9 @@ public class SpawnListener implements Listener {
     Block block = event.getBlockPlaced();
     if (isAmethystBlock(block.getType())) {
       revealManager.rememberAmethystBlock(block.getX(), block.getY(), block.getZ());
+    }
+    if (placedBlockHider != null) {
+      placedBlockHider.trackPlaced(event.getPlayer(), block);
     }
   }
 
@@ -135,6 +150,9 @@ public class SpawnListener implements Listener {
       if (isAmethystBlock(block.getType())) {
         revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
       }
+      if (placedBlockHider != null) {
+        placedBlockHider.untrack(block.getWorld(), block.getX(), block.getY(), block.getZ());
+      }
     }
   }
 
@@ -152,8 +170,10 @@ public class SpawnListener implements Listener {
       if (isAmethystBlock(block.getType())) {
         revealManager.forgetAmethystBlock(block.getX(), block.getY(), block.getZ());
       }
+      if (placedBlockHider != null) {
+        placedBlockHider.untrack(block.getWorld(), block.getX(), block.getY(), block.getZ());
+      }
     }
-
   }
 
   private void syncOne(Block before, BlockState after) {

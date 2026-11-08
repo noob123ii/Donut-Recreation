@@ -100,9 +100,6 @@ public final class BlockEntityDebugProtection {
     }
     int floorY = revealManager.hideBelowY();
     int upperY = revealManager.upperBarrierY();
-    boolean surfaceMasked = revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ);
-    int surfaceStart = revealManager.surfaceScrambleStartY();
-    int surfaceEnd = revealManager.surfaceScrambleMaxY();
 
     List<TileEntity> keep = new ArrayList<>(tiles.length);
     for (TileEntity t : tiles) {
@@ -110,9 +107,6 @@ public final class BlockEntityDebugProtection {
         continue;
       }
       int y = t.getY();
-      if (surfaceMasked && y >= surfaceStart && y < surfaceEnd) {
-        continue;
-      }
       if (y >= upperY) {
         keep.add(t);
         continue;
@@ -139,13 +133,6 @@ public final class BlockEntityDebugProtection {
     var position = wrapper.getPosition();
     int blockY = position.getY();
 
-    if (revealManager.isSurfaceScrambleNear(
-            player, position.getX() >> 4, position.getZ() >> 4)
-        && blockY >= revealManager.surfaceScrambleStartY()
-        && blockY < revealManager.surfaceScrambleMaxY()) {
-      event.setCancelled(true);
-      return;
-    }
     if (!revealManager.isPositionVisible(player, position.getX(), blockY, position.getZ())) {
       event.setCancelled(true);
     }

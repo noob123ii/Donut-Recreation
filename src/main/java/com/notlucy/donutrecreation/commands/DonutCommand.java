@@ -120,15 +120,9 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
         return true;
       }
       if (args.length > 1 && "rescan".equalsIgnoreCase(args[1])) {
-        if (!(sender instanceof Player player)) {
-          sender.sendMessage(plugin.color("&cThis subcommand can only be run by a player."));
-          return true;
-        }
-        if (!hiderManager.refreshSurfaceScramble(player)) {
-          sender.sendMessage(plugin.color("&cRescan is on cooldown or unavailable. Wait a few seconds and try again."));
-          return true;
-        }
-        sender.sendMessage(plugin.color("&aSurface mask rescan started (batched)."));
+        sender.sendMessage(plugin.color(
+            "&eTerrain/surface hiding was removed (it caused lag). "
+                + "&7Placed bases above y=60 and chests below y=0 are now hidden instantly via packets."));
         return true;
       }
       Player player = sender instanceof Player p ? p : null;

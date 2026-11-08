@@ -20,7 +20,9 @@ import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.protocol.world.states.WrappedBlockState;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerBlockChange;
 import org.bukkit.entity.Player;
+import com.notlucy.donutrecreation.baseprotection.PlacedBlockHider;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
+import com.notlucy.donutrecreation.baseprotection.packet.BlockIdRegistry;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
 import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection;
 
@@ -29,14 +31,25 @@ public final class BlockChangeHandler {
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
   private final com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility;
+  private final PlacedBlockHider placedBlockHider;
+  private final BlockIdRegistry blockIds;
 
   public BlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate,
       AmethystProtection amethyst,
       com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility) {
+    this(revealManager, deepslate, amethyst, oreVisibility, null, null);
+  }
+
+  public BlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate,
+      AmethystProtection amethyst,
+      com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility,
+      PlacedBlockHider placedBlockHider, BlockIdRegistry blockIds) {
     this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
     this.oreVisibility = oreVisibility;
+    this.placedBlockHider = placedBlockHider;
+    this.blockIds = blockIds;
   }
 
   public boolean handlePacket(PacketSendEvent event, Player player) {
@@ -47,6 +60,11 @@ public final class BlockChangeHandler {
     }
     int x = position.getX(), y = position.getY(), z = position.getZ();
 
+    if (placedBlockHider != null && blockIds != null
+        && placedBlockHider.rewriteBlockChange(wrapper, player, blockIds)) {
+      event.markForReEncode(true);
+      return true;
+    }
     if (deepslate.rewriteBlockChange(wrapper, player, x, y, z)
         || amethyst.rewriteBlockChange(wrapper, player, x, y, z)) {
       event.markForReEncode(true);

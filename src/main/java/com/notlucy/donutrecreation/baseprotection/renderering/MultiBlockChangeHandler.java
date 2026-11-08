@@ -18,9 +18,10 @@ package com.notlucy.donutrecreation.baseprotection.renderering;
 
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
-import org.bukkit.HeightMap;
 import org.bukkit.entity.Player;
+import com.notlucy.donutrecreation.baseprotection.PlacedBlockHider;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
+import com.notlucy.donutrecreation.baseprotection.packet.BlockIdRegistry;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
 import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection;
 import com.notlucy.donutrecreation.spawn.manager.GhostBlockManager;
@@ -30,15 +31,26 @@ public final class MultiBlockChangeHandler {
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
   private final com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility;
+  private final PlacedBlockHider placedBlockHider;
+  private final BlockIdRegistry blockIds;
   private GhostBlockManager ghostBlockManager;
 
   public MultiBlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate,
       AmethystProtection amethyst,
       com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility) {
+    this(revealManager, deepslate, amethyst, oreVisibility, null, null);
+  }
+
+  public MultiBlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate,
+      AmethystProtection amethyst,
+      com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility,
+      PlacedBlockHider placedBlockHider, BlockIdRegistry blockIds) {
     this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
     this.oreVisibility = oreVisibility;
+    this.placedBlockHider = placedBlockHider;
+    this.blockIds = blockIds;
   }
 
   public void setGhostBlockManager(GhostBlockManager gbm) {
@@ -62,13 +74,10 @@ public final class MultiBlockChangeHandler {
     int spawnerMaskAboveY = revealManager.spawnerMaskAboveY();
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(player.getUniqueId());
     boolean maskBase = player.getWorld().getEnvironment() == org.bukkit.World.Environment.NORMAL;
-    boolean surfaceLocked = revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ);
-    int surfaceTop = Math.min(player.getWorld().getMaxHeight(),
-        revealManager.surfaceScrambleMaxY());
-    int chunkFlatY = (maskBase && surfaceLocked) ? chunkFlatY(player, chunkX, chunkZ, salt)
-        : Integer.MIN_VALUE;
-    int floorFixes = 0, spawnerFixes = 0;
+    int floorFixes = 0, spawnerFixes = 0, placedFixes = 0;
     int spawnerId = deepslate.spawnerId();
+    var peVersion = blockIds == null ? null : blockIds.version();
+    java.util.UUID worldId = player.getWorld().getUID();
 
     for (var encodedBlock : wrapper.getBlocks()) {
       int blockY = encodedBlock.getY();
@@ -78,23 +87,13 @@ public final class MultiBlockChangeHandler {
           && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), blockX, blockY, blockZ)) {
         continue;
       }
-      boolean surfaceBand = maskBase && surfaceLocked
-          && blockY >= revealManager.surfaceScrambleStartY() && blockY < surfaceTop;
-      if (surfaceBand) {
-        int hideBelow = Math.max(revealManager.surfaceScrambleStartY(),
-            chunkFlatY - Math.max(0, revealManager.surfaceHideDepth()));
-        if (blockY > chunkFlatY) {
-          int want = deepslate.airId();
-          if (encodedBlock.getBlockId() != want) {
-            encodedBlock.setBlockId(want);
-            floorFixes++;
-          }
-        } else if (blockY >= hideBelow) {
-          int want = deepslate.stoneId();
-          if (encodedBlock.getBlockId() != want) {
-            encodedBlock.setBlockId(want);
-            floorFixes++;
-          }
+      if (placedBlockHider != null && blockIds != null && peVersion != null
+          && placedBlockHider.shouldHideBlockChange(
+              player, worldId, blockX, blockY, blockZ, encodedBlock.getBlockId(), peVersion)) {
+        int want = placedBlockHider.coverGlobalId(player.getWorld(), blockY, blockIds);
+        if (encodedBlock.getBlockId() != want) {
+          encodedBlock.setBlockId(want);
+          placedFixes++;
         }
         continue;
       }
@@ -128,36 +127,13 @@ public final class MultiBlockChangeHandler {
       }
     }
     int oreFixes = oreVisibility.rewriteMultiBlock(wrapper, player);
-    int amFixes = amethyst.rewriteMultiBlock(wrapper, player, false, floorFixes);
+    int amFixes = amethyst.rewriteMultiBlock(wrapper, player, false, floorFixes + placedFixes);
 
-    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || oreFixes > 0;
+    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || oreFixes > 0
+        || placedFixes > 0;
     if (touched) {
       event.markForReEncode(true);
     }
     return touched;
-  }
-
-  private int chunkFlatY(Player player, int chunkX, int chunkZ, int salt) {
-    int hash = (chunkX * 73428767 ^ chunkZ * 912367) + (salt * 0x45D9F3B);
-    hash ^= (hash >>> 16);
-    hash *= 0x45D9F3B;
-    hash ^= (hash >>> 16);
-    int sx = hash & 15;
-    int sz = (hash >>> 4) & 15;
-    int x = (chunkX << 4) + sx;
-    int z = (chunkZ << 4) + sz;
-    try {
-      if (player.getWorld().isChunkLoaded(chunkX, chunkZ)) {
-        return player.getWorld().getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
-      }
-    } catch (Throwable ignored) {
-      try {
-        if (player.getWorld().isChunkLoaded(chunkX, chunkZ)) {
-          return player.getWorld().getHighestBlockYAt(x, z);
-        }
-      } catch (Throwable ignored2) {
-      }
-    }
-    return Math.max(player.getWorld().getMinHeight(), revealManager.surfaceScrambleStartY());
   }
 }

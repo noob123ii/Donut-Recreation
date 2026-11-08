@@ -47,12 +47,7 @@ public final class UpdateLightHandler {
         LightDebugProtection.stripSectionRange(light, minSection, floorSection, minSection);
         touched = true;
       }
-      if (revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ)) {
-        LightDebugProtection.stripSectionRange(
-            light, Math.max(minSection, revealManager.surfaceScrambleStartY() >> 4),
-            (revealManager.surfaceScrambleMaxY() - 1) >> 4, minSection);
-        touched = true;
-      } else if (upperY > revealManager.hideBelowY()
+      if (upperY > revealManager.hideBelowY()
           && !revealManager.isBarrierBandRevealed(player, chunkX, chunkZ)) {
         LightDebugProtection.stripSectionRange(
             light, Math.max(minSection, floorSection), upperSection, minSection);

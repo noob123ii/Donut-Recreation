@@ -81,8 +81,6 @@ public class RevealManager {
   private final ConcurrentMap<UUID, Set<Long>> cachedCaveFlood        = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, long[]>   lastRevealRefresh  = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Integer>  playerSalts          = new ConcurrentHashMap<>();
-  private final ConcurrentMap<UUID, Long>     lastRescanMs         = new ConcurrentHashMap<>();
-  private final ConcurrentMap<UUID, Integer>  rescanTasks          = new ConcurrentHashMap<>();
 
   private final int     floorY;
   private final int     upperY;
@@ -119,35 +117,12 @@ public class RevealManager {
   private final long       spawnerRevealDistanceSq;
   private final ConcurrentMap<Long, Set<Long>> spawnerPositionsByChunk;
   private final ConcurrentMap<UUID, Set<Long>> revealedSpawnerPositions;
-  private final Set<UUID> scrambledPlayers = ConcurrentHashMap.newKeySet();
-  private final boolean scrambleEnabled;
-  private final int scrambleBelowY;
-  private final int scrambleUntilAboveY;
-  private final boolean surfaceScrambleEnabled;
-  private final int surfaceScrambleMaxY;
-  private final int surfaceScrambleRadius;
-  private final int surfaceHideDepth;
-  private final ConcurrentMap<UUID, Set<Long>> surfaceMaskedChunks = new ConcurrentHashMap<>();
-  private final Set<UUID> fullSurfaceMask = ConcurrentHashMap.newKeySet();
-  private final ConcurrentMap<UUID, Long> lastSurfaceTransitionMs = new ConcurrentHashMap<>();
-  private static final long SURFACE_TRANSITION_COOLDOWN_MS = 3000L;
 
   public RevealManager(DonutRecreation plugin) {
     this.plugin = plugin;
     var cfg = plugin.getConfig();
     this.floorY            = cfg.getInt("hider.hide-below-y", 0);
     this.upperY            = Math.max(this.floorY, cfg.getInt("hider.barrier-upper-y", 12));
-    this.scrambleEnabled   = cfg.getBoolean("hider.scramble-enabled", true);
-    this.scrambleBelowY    = cfg.getInt("hider.scramble-below-y", this.floorY);
-    this.scrambleUntilAboveY = Math.max(this.scrambleBelowY,
-        cfg.getInt("hider.scramble-until-above-y", 0));
-    this.surfaceScrambleEnabled = cfg.getBoolean("hider.surface-scramble-enabled", true);
-    this.surfaceScrambleMaxY = Math.max(this.scrambleBelowY + 1,
-        cfg.getInt("hider.surface-scramble-max-y", 128));
-    this.surfaceScrambleRadius = Math.max(0, Math.min(6,
-        cfg.getInt("hider.surface-scramble-radius", 1)));
-    this.surfaceHideDepth = Math.max(0, Math.min(32,
-        cfg.getInt("hider.surface-hide-depth", 10)));
     this.upperRevealRadius = Math.max(1, cfg.getInt("hider.upper-reveal-radius", 1));
     this.worldMinY         = cfg.getInt("hider.world-min-y", -64);
     this.initialRadius     = cfg.getInt("hider.reveal-initial-radius", 3);
@@ -208,34 +183,7 @@ public class RevealManager {
 
   public int hideBelowY()   { return floorY; }
   public int upperBarrierY() { return upperY; }
-  public boolean scrambleEnabled() { return scrambleEnabled; }
-  public int scrambleBelowY() { return scrambleBelowY; }
-  public int scrambleUntilAboveY() { return scrambleUntilAboveY; }
-  public boolean surfaceScrambleEnabled() { return surfaceScrambleEnabled; }
-  public int surfaceScrambleMaxY() { return surfaceScrambleMaxY; }
-  public int surfaceScrambleRadius() { return surfaceScrambleRadius; }
-  public int surfaceHideDepth() { return surfaceHideDepth; }
 
-  /** The surface mask starts above the normal barrier band so the band can still reveal. */
-  public int surfaceScrambleStartY() { return Math.max(scrambleBelowY, upperY); }
-
-  /** Deterministic fake terrain height used while the surface is scrambled. */
-  public int fakeSurfaceY(int worldX, int worldZ, int salt) {
-    int start = surfaceScrambleStartY();
-    int end = Math.max(start + 1, surfaceScrambleMaxY);
-    int base = start + Math.min(end - start - 1, 52);
-    int hash = (worldX * 374761393 ^ worldZ * 668265263) + (salt ^ 0x5EEDFACE);
-    hash = (hash ^ (hash >> 13)) * 1274126177;
-    hash ^= (hash >> 16);
-    int y = base + Math.floorMod(hash, 5) - 2;
-    if (y < start) {
-      y = start;
-    }
-    if (y >= end) {
-      y = end - 1;
-    }
-    return y;
-  }
   public int spawnerMaskAboveY() { return spawnerMaskAboveY; }
   public long spawnerRevealDistanceSq() { return spawnerRevealDistanceSq; }
   public int spawnerRevealDistance() { return spawnerRevealDistance; }
@@ -325,11 +273,6 @@ public class RevealManager {
 
   public boolean isPositionVisible(Player player, int x, int y, int z) {
     if (player == null) return false;
-    if (surfaceScrambleEnabled && isScrambleLocked(player)
-        && y >= surfaceScrambleStartY() && y < surfaceScrambleMaxY()
-        && isSurfaceScrambleNear(player, x >> 4, z >> 4)) {
-      return false;
-    }
     if (y >= upperY) return true;
     if (isCaveBlockVisible(player, x, y, z)) return true;
     if (y < floorY) {
@@ -442,35 +385,6 @@ public class RevealManager {
     int playerChunkZ = loc.getBlockZ() >> 4;
     int playerY  = loc.getBlockY();
 
-    /* Surface lock: dropping below scramble-below-y scrubs the surface volume until the player
-     * climbs back above scramble-until-above-y. Ores below the line are never touched. */
-    boolean wasLocked = scrambledPlayers.contains(playerId);
-    if (scrambleEnabled) {
-      if (playerY <= scrambleBelowY) {
-        scrambledPlayers.add(playerId);
-      } else if (playerY > scrambleUntilAboveY) {
-        scrambledPlayers.remove(playerId);
-      }
-    }
-    boolean nowLocked = scrambledPlayers.contains(playerId);
-    if (nowLocked != wasLocked) {
-      long now = System.currentTimeMillis();
-      Long last = lastSurfaceTransitionMs.get(playerId);
-      if (last == null || (now - last) >= SURFACE_TRANSITION_COOLDOWN_MS) {
-        lastSurfaceTransitionMs.put(playerId, now);
-        applySurfaceScramble(player, nowLocked);
-      } else {
-        /* Revert the transient flip; the hysteresis state will settle after cooldown. */
-        if (wasLocked) {
-          scrambledPlayers.add(playerId);
-        } else {
-          scrambledPlayers.remove(playerId);
-        }
-      }
-    }
-    /* While locked, chunk packet rewriting masks newly sent chunks. Avoid re-scanning all
-     * loaded chunks on every refresh; use /donut xray rescan for a full re-apply. */
-
     if (isRevealThrottled(playerId, playerChunkX, playerChunkZ, playerY)) {
       refreshGeodeVisibility(player);
       refreshSpawnerVisibility(player);
@@ -486,426 +400,17 @@ public class RevealManager {
     refreshEntityVisibility(player);
   }
 
-  /** Read-only lock check; {@link #refreshRevealState(Player)} owns the state transitions. */
-  public boolean isScrambleLocked(Player player) {
-    if (!scrambleEnabled || player == null) {
-      return false;
-    }
-    int y = player.getLocation().getBlockY();
-    if (y > scrambleUntilAboveY) {
-      return false;
-    }
-    return y <= scrambleBelowY || scrambledPlayers.contains(player.getUniqueId());
-  }
-
-  /**
-   * Full re-apply used by {@code /donut xray rescan}: switches the player to whole-world mode
-   * while locked, or restores everything currently masked while unlocked.
-   */
-  public boolean refreshSurfaceScramble(Player player) {
-    if (!surfaceScrambleEnabled || player == null || !player.isOnline()) {
-      return false;
-    }
-    UUID playerId = player.getUniqueId();
-    long now = System.currentTimeMillis();
-    Long last = lastRescanMs.get(playerId);
-    if (last != null && (now - last) < 10_000L) {
-      return false;
-    }
-    lastRescanMs.put(playerId, now);
-    Integer existing = rescanTasks.remove(playerId);
-    if (existing != null) {
-      Bukkit.getScheduler().cancelTask(existing);
-    }
-
-    boolean locked = isScrambleLocked(player);
-    if (locked) {
-      scrambledPlayers.add(playerId);
-      fullSurfaceMask.add(playerId);
-    } else {
-      scrambledPlayers.remove(playerId);
-    }
-    applySurfaceScrambleBatched(player, locked);
-    return true;
-  }
-
-  /** Drops transient surface state when a player leaves. */
-  public void clearSurfaceScramble(UUID playerId) {
-    if (playerId != null) {
-      scrambledPlayers.remove(playerId);
-      fullSurfaceMask.remove(playerId);
-      surfaceMaskedChunks.remove(playerId);
-      lastSurfaceTransitionMs.remove(playerId);
-      lastRescanMs.remove(playerId);
-      Integer task = rescanTasks.remove(playerId);
-      if (task != null) {
-        Bukkit.getScheduler().cancelTask(task);
-      }
-    }
-  }
-
   public List<String> xrayStatus(Player player) {
     List<String> lines = new ArrayList<>();
     lines.add("hider=on floor=" + floorY + " band=" + floorY + ".." + upperY);
-    lines.add("surfaceScramble=" + (surfaceScrambleEnabled ? "enabled" : "disabled")
-        + " maxY=" + surfaceScrambleMaxY + " radius=" + surfaceScrambleRadius);
+    lines.add("terrainHiding=removed (lag fix); placed-base hiding is active via packets/events");
     if (player != null) {
-      lines.add("lock=" + isScrambleLocked(player)
-          + " full=" + fullSurfaceMask.contains(player.getUniqueId())
-          + " below=" + scrambleBelowY
-          + " untilAbove=" + scrambleUntilAboveY
-          + " playerY=" + player.getLocation().getBlockY());
+      lines.add("playerY=" + player.getLocation().getBlockY());
     }
     return lines;
   }
 
-  /**
-   * Masks or restores the above-ground volume around the player. Masking replaces every block
-   * up to {@code surface-scramble-max-y} with the noise palette so surface builds cannot be
-   * spotted from underground; restoring sends the real blocks back.
-   */
-  private void applySurfaceScramble(Player player, boolean mask) {
-    if (!surfaceScrambleEnabled || player == null || !player.isOnline()) {
-      return;
-    }
-    World world = player.getWorld();
-    if (world == null) {
-      return;
-    }
-    UUID playerId = player.getUniqueId();
-    Set<Long> maskedChunks = surfaceMaskedChunks.computeIfAbsent(
-        playerId, ignoredKey -> ConcurrentHashMap.newKeySet());
-    long started = System.nanoTime();
-    int changed = 0;
 
-    if (!mask) {
-      for (long key : maskedChunks.toArray(new Long[0])) {
-        int chunkX = keyX(key);
-        int chunkZ = keyZ(key);
-        if (world.isChunkLoaded(chunkX, chunkZ)
-            && wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-          sendSurfaceBand(player, chunkX, chunkZ, false);
-          changed++;
-        }
-        maskedChunks.remove(key);
-      }
-      fullSurfaceMask.remove(playerId);
-      if (verbose && changed > 0) {
-        LogData.get().info("[hider] surface reveal " + changed + " chunks in "
-            + ((System.nanoTime() - started) / 1_000_000L) + "ms");
-      }
-      return;
-    }
-
-    if (fullSurfaceMask.contains(playerId)) {
-      /* /donut xray rescan: cover every loaded chunk that was sent to this client. */
-      for (Chunk loadedChunk : world.getLoadedChunks()) {
-        int chunkX = loadedChunk.getX();
-        int chunkZ = loadedChunk.getZ();
-        if (!wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-          continue;
-        }
-        long key = chunkKey(chunkX, chunkZ);
-        if (maskedChunks.add(key)) {
-          sendSurfaceBand(player, chunkX, chunkZ, true);
-          changed++;
-        }
-      }
-    } else {
-      int centerX = player.getLocation().getBlockX() >> 4;
-      int centerZ = player.getLocation().getBlockZ() >> 4;
-      int radius = Math.max(0, surfaceScrambleRadius);
-      for (int dx = -radius; dx <= radius; dx++) {
-        for (int dz = -radius; dz <= radius; dz++) {
-          int chunkX = centerX + dx;
-          int chunkZ = centerZ + dz;
-          if (!world.isChunkLoaded(chunkX, chunkZ)
-              || !wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-            continue;
-          }
-          long key = chunkKey(chunkX, chunkZ);
-          if (maskedChunks.add(key)) {
-            sendSurfaceBand(player, chunkX, chunkZ, true);
-            changed++;
-          }
-        }
-      }
-    }
-    if (verbose && changed > 0) {
-      LogData.get().info("[hider] surface mask " + changed + " chunks in "
-          + ((System.nanoTime() - started) / 1_000_000L) + "ms");
-    }
-  }
-
-  private void applySurfaceScrambleBatched(Player player, boolean mask) {
-    if (!surfaceScrambleEnabled || player == null || !player.isOnline()) {
-      return;
-    }
-    UUID playerId = player.getUniqueId();
-    World world = player.getWorld();
-    if (world == null) {
-      return;
-    }
-    Set<Long> maskedChunks = surfaceMaskedChunks.computeIfAbsent(
-        playerId, ignoredKey -> ConcurrentHashMap.newKeySet());
-
-    java.util.ArrayDeque<long[]> work = new java.util.ArrayDeque<>();
-    if (!mask) {
-      for (long key : maskedChunks.toArray(new Long[0])) {
-        int chunkX = keyX(key);
-        int chunkZ = keyZ(key);
-        if (wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-          work.add(new long[]{chunkKey(chunkX, chunkZ)});
-        } else {
-          maskedChunks.remove(key);
-        }
-      }
-      fullSurfaceMask.remove(playerId);
-    } else if (fullSurfaceMask.contains(playerId)) {
-      for (Chunk loadedChunk : world.getLoadedChunks()) {
-        int chunkX = loadedChunk.getX();
-        int chunkZ = loadedChunk.getZ();
-        if (wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-          work.add(new long[]{chunkKey(chunkX, chunkZ)});
-        }
-      }
-    } else {
-      int centerX = player.getLocation().getBlockX() >> 4;
-      int centerZ = player.getLocation().getBlockZ() >> 4;
-      int radius = Math.max(0, surfaceScrambleRadius);
-      for (int dx = -radius; dx <= radius; dx++) {
-        for (int dz = -radius; dz <= radius; dz++) {
-          int chunkX = centerX + dx;
-          int chunkZ = centerZ + dz;
-          if (world.isChunkLoaded(chunkX, chunkZ)
-              && wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-            work.add(new long[]{chunkKey(chunkX, chunkZ)});
-          }
-        }
-      }
-    }
-
-    if (work.isEmpty()) {
-      return;
-    }
-
-    final int perTick = 2;
-    org.bukkit.scheduler.BukkitRunnable runnable = new org.bukkit.scheduler.BukkitRunnable() {
-      @Override
-      public void run() {
-        if (!player.isOnline() || !player.getUniqueId().equals(playerId)) {
-          rescanTasks.remove(playerId);
-          cancel();
-          return;
-        }
-        World currentWorld = player.getWorld();
-        if (currentWorld == null) {
-          rescanTasks.remove(playerId);
-          cancel();
-          return;
-        }
-        for (int i = 0; i < perTick && !work.isEmpty(); i++) {
-          long[] item = work.poll();
-          if (item == null) {
-            break;
-          }
-          int chunkX = keyX(item[0]);
-          int chunkZ = keyZ(item[0]);
-          if (!currentWorld.isChunkLoaded(chunkX, chunkZ)
-              || !wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-            if (!mask) {
-              maskedChunks.remove(item[0]);
-            }
-            continue;
-          }
-          try {
-            sendSurfaceBand(player, chunkX, chunkZ, mask);
-            if (mask) {
-              maskedChunks.add(item[0]);
-            } else {
-              maskedChunks.remove(item[0]);
-            }
-          } catch (Throwable ignored) {
-          }
-        }
-        if (work.isEmpty()) {
-          rescanTasks.remove(playerId);
-          cancel();
-        }
-      }
-    };
-    runnable.runTaskTimer(plugin, 1L, 1L);
-    rescanTasks.put(playerId, runnable.getTaskId());
-  }
-
-  private boolean isChunkWithin(Player player, long chunkKeyValue, int radius) {
-    Location location = player.getLocation();
-    int dx = (location.getBlockX() >> 4) - keyX(chunkKeyValue);
-    int dz = (location.getBlockZ() >> 4) - keyZ(chunkKeyValue);
-    return Math.abs(dx) <= radius && Math.abs(dz) <= radius;
-  }
-
-  private int chunkFlatY(ChunkSnapshot snapshot, World world, int chunkX, int chunkZ, int salt) {
-    int hash = (chunkX * 73428767 ^ chunkZ * 912367) + (salt * 0x45D9F3B);
-    hash ^= (hash >>> 16);
-    hash *= 0x45D9F3B;
-    hash ^= (hash >>> 16);
-    int sx = hash & 15;
-    int sz = (hash >>> 4) & 15;
-    int maxY = Math.min(snapshot.getHighestBlockYAt(sx, sz), world.getMaxHeight() - 1);
-    int minY = Math.max(world.getMinHeight(), surfaceScrambleStartY());
-    for (int y = maxY; y >= minY; y--) {
-      try {
-        Material type = snapshot.getBlockData(sx & 15, y, sz & 15).getMaterial();
-        if (isTerrainForHeightmap(type)) {
-          return y;
-        }
-      } catch (Throwable ignored) {
-        return y;
-      }
-    }
-    try {
-      return snapshot.getHighestBlockYAt(sx, sz);
-    } catch (Throwable ignored) {
-      return Math.max(world.getMinHeight(), surfaceScrambleStartY());
-    }
-  }
-
-  private static boolean isTerrainForHeightmap(Material material) {
-    if (material == null || material.isAir()) {
-      return false;
-    }
-    String name = material.name();
-    if (name.contains("LEAVES")) {
-      return false;
-    }
-    if (name.endsWith("_LOG") || name.endsWith("_WOOD") || "MANGROVE_ROOTS".equals(name)
-        || "MUDDY_MANGROVE_ROOTS".equals(name) || name.contains("STEM")
-        || name.contains("HYPHAE") || "BAMBOO_BLOCK".equals(name)
-        || "STRIPPED_BAMBOO_BLOCK".equals(name)) {
-      return false;
-    }
-    if (name.contains("VINE") || name.endsWith("_SAPLING") || name.equals("MANGROVE_PROPAGULE")
-        || (name.contains("AZALEA") && !name.contains("LEAVES"))
-        || "BEE_NEST".equals(name) || "BEEHIVE".equals(name)
-        || "COCOA".equals(name) || "MUSHROOM_STEM".equals(name)
-        || name.contains("MUSHROOM_BLOCK") || "BAMBOO".equals(name)) {
-      return false;
-    }
-    return true;
-  }
-
-  /** Records a chunk whose surface was masked during a CHUNK_DATA rewrite. */
-  public void recordSurfaceMaskedChunk(Player player, int chunkX, int chunkZ) {
-    if (!surfaceScrambleEnabled || player == null) {
-      return;
-    }
-    surfaceMaskedChunks.computeIfAbsent(
-        player.getUniqueId(), ignoredKey -> ConcurrentHashMap.newKeySet())
-        .add(chunkKey(chunkX, chunkZ));
-  }
-
-  /** True when a chunk is close enough to the player to receive the surface mask. */
-  public boolean isSurfaceScrambleNear(Player player, int chunkX, int chunkZ) {
-    if (!surfaceScrambleEnabled || player == null || !isScrambleLocked(player)) {
-      return false;
-    }
-    if (fullSurfaceMask.contains(player.getUniqueId())) {
-      return true;
-    }
-    Location location = player.getLocation();
-    int dx = (location.getBlockX() >> 4) - chunkX;
-    int dz = (location.getBlockZ() >> 4) - chunkZ;
-    return Math.abs(dx) <= surfaceScrambleRadius && Math.abs(dz) <= surfaceScrambleRadius;
-  }
-
-  void sendSurfaceBand(Player player, int chunkX, int chunkZ, boolean mask) {
-    World world = player.getWorld();
-    if (!world.isChunkLoaded(chunkX, chunkZ)) {
-      return;
-    }
-    if (!wasChunkDeliveredTo(player.getUniqueId(), chunkX, chunkZ)) {
-      return;
-    }
-    int fromY = Math.max(world.getMinHeight(), surfaceScrambleStartY());
-    int toY = Math.min(world.getMaxHeight(), surfaceScrambleMaxY);
-    if (fromY >= toY) {
-      return;
-    }
-    ChunkSnapshot snapshot = world.getChunkAt(chunkX, chunkZ).getChunkSnapshot();
-    BlockData maskBlock = maskPalette[0];
-    BlockData stoneBlock = Material.STONE.createBlockData();
-    BlockData airBlock = Material.AIR.createBlockData();
-    UUID playerId = player.getUniqueId();
-    boolean checkGhosts = hasAnyGhostBlocks(playerId);
-    int baseX = chunkX << 4;
-    int baseZ = chunkZ << 4;
-    final int batchSize = 4096;
-    Map<Location, BlockData> batch = new HashMap<>(batchSize);
-    int n = 0;
-    int salt = getPlayerSalt(playerId);
-    int flatY = chunkFlatY(snapshot, world, chunkX, chunkZ, salt);
-    int hideDepth = Math.max(0, surfaceHideDepth);
-    int hideBelow = Math.max(fromY, flatY - hideDepth);
-    int airFrom = Math.max(fromY, flatY + 1);
-    int stoneTo = Math.min(toY, flatY + 1);
-    int stoneFrom = Math.max(fromY, hideBelow);
-    for (int x = 0; x < 16; x++) {
-      int worldX = baseX + x;
-      for (int z = 0; z < 16; z++) {
-        int worldZ = baseZ + z;
-        if (mask) {
-          for (int y = stoneFrom; y < stoneTo; y++) {
-            if (checkGhosts
-                && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
-              continue;
-            }
-            batch.put(new Location(world, worldX, y, worldZ), stoneBlock);
-            if (++n >= batchSize) {
-              player.sendMultiBlockChange(batch);
-              batch.clear();
-              n = 0;
-            }
-          }
-          for (int y = airFrom; y < toY; y++) {
-            if (checkGhosts
-                && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
-              continue;
-            }
-            batch.put(new Location(world, worldX, y, worldZ), airBlock);
-            if (++n >= batchSize) {
-              player.sendMultiBlockChange(batch);
-              batch.clear();
-              n = 0;
-            }
-          }
-        } else {
-          for (int y = stoneFrom; y < toY; y++) {
-            if (y >= stoneTo && y < airFrom) {
-              continue;
-            }
-            if (checkGhosts
-                && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
-              continue;
-            }
-            BlockData data = snapshot.getBlockData(x & 15, y, z & 15);
-            if (isGeodeMaterial(data.getMaterial())) {
-              data = maskBlock;
-            }
-            batch.put(new Location(world, worldX, y, worldZ), data);
-            if (++n >= batchSize) {
-              player.sendMultiBlockChange(batch);
-              batch.clear();
-              n = 0;
-            }
-          }
-        }
-      }
-    }
-    if (!batch.isEmpty()) {
-      player.sendMultiBlockChange(batch);
-    }
-  }
 
   private final ConcurrentMap<UUID, int[]> lastRevealRangeCenter = new ConcurrentHashMap<>();
 
@@ -975,15 +480,6 @@ public class RevealManager {
     revealedGeodeChunks.remove(playerId);
     visibleCaveBlocks.remove(playerId);
     deliveredChunkKeys.remove(playerId);
-    scrambledPlayers.remove(playerId);
-    surfaceMaskedChunks.remove(playerId);
-    fullSurfaceMask.remove(playerId);
-    lastSurfaceTransitionMs.remove(playerId);
-    lastRescanMs.remove(playerId);
-    Integer task = rescanTasks.remove(playerId);
-    if (task != null) {
-      Bukkit.getScheduler().cancelTask(task);
-    }
     lastRevealRangeCenter.remove(playerId);
   }
 
@@ -1752,9 +1248,6 @@ public class RevealManager {
       revealedGeodeChunks.remove(playerId);
       revealedSpawnerPositions.remove(playerId);
       visibleCaveBlocks.remove(playerId);
-      scrambledPlayers.remove(playerId);
-      surfaceMaskedChunks.remove(playerId);
-      fullSurfaceMask.remove(playerId);
     }
   }
 
@@ -1785,15 +1278,6 @@ public class RevealManager {
     lastEntityScanTick.remove(playerId);
     playerWorldUids.remove(playerId);
     playerEnvironments.remove(playerId);
-    scrambledPlayers.remove(playerId);
-    surfaceMaskedChunks.remove(playerId);
-    fullSurfaceMask.remove(playerId);
-    lastSurfaceTransitionMs.remove(playerId);
-    lastRescanMs.remove(playerId);
-    Integer rescanTask = rescanTasks.remove(playerId);
-    if (rescanTask != null) {
-      Bukkit.getScheduler().cancelTask(rescanTask);
-    }
     lastRevealRangeCenter.remove(playerId);
   }
 

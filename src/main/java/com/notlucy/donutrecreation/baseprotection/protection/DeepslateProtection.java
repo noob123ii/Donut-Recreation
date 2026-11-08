@@ -16,7 +16,6 @@
  */
 package com.notlucy.donutrecreation.baseprotection.protection;
 
-import org.bukkit.HeightMap;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Player;
@@ -31,7 +30,6 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerCh
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerMultiBlockChange;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.packet.BlockIdRegistry;
-import com.notlucy.donutrecreation.baseprotection.renderering.BlockEntityDebugProtection;
 import com.notlucy.donutrecreation.baseprotection.renderering.LightDebugProtection;
 import com.notlucy.donutrecreation.util.LogData;
 
@@ -79,9 +77,6 @@ public final class DeepslateProtection {
     int spawnerMaskAboveY = revealManager.spawnerMaskAboveY();
     int spawnerStoneId = blockIds.stoneId();
     boolean scanSpawners = spawnerMaskAboveY < player.getWorld().getMaxHeight() - 1;
-    boolean surfaceLocked = revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ);
-    int surfaceTop = Math.min(player.getWorld().getMaxHeight(),
-        revealManager.surfaceScrambleMaxY());
 
     boolean touched = false;
     int modifiedSections = 0;
@@ -114,18 +109,6 @@ public final class DeepslateProtection {
         touched = true;
         modifiedSections++;
       }
-      if (surfaceLocked) {
-        /* Underground surface lock: replace the top terrain layer and clear blocks above it.
-         * Terrain below the heightmap is left intact so the area stays usable and cheap to render. */
-        int sFromY = Math.max(0, revealManager.surfaceScrambleStartY() - worldOriginY);
-        int sToY = Math.min(16, surfaceTop - worldOriginY);
-        if (sToY > sFromY) {
-          fillSurfaceMask(section, worldOriginX, worldOriginY, worldOriginZ, sFromY, sToY,
-              salt, player, sections, minSection);
-          touched = true;
-          modifiedSections++;
-        }
-      }
 
       if (scanSpawners && worldOriginY + 15 > spawnerMaskAboveY) {
         int spawnerMasked = 0;
@@ -150,10 +133,6 @@ public final class DeepslateProtection {
       }
     }
 
-    if (surfaceLocked) {
-      revealManager.recordSurfaceMaskedChunk(player, chunkX, chunkZ);
-    }
-
     if (touched || nullSections > 0) {
       try {
         var light = wrapper.getLightData();
@@ -163,11 +142,6 @@ public final class DeepslateProtection {
         if (upperActive && !upperRevealed) {
           LightDebugProtection.stripSectionRange(
               light, Math.max(minSection, floorSection), (upperY - 1) >> 4, minSection);
-        }
-        if (surfaceLocked) {
-          LightDebugProtection.stripSectionRange(
-              light, Math.max(minSection, revealManager.surfaceScrambleStartY() >> 4),
-              (surfaceTop - 1) >> 4, minSection);
         }
       } catch (Exception e) {
         LogData.get().warning("[deepslate] light strip failed at " + chunkX + "," + chunkZ + ": " + e);
@@ -192,26 +166,6 @@ public final class DeepslateProtection {
     int chunkX = x >> 4;
     int chunkZ = z >> 4;
     int salt = revealManager.getPlayerSalt(player.getUniqueId());
-    int surfaceTop = Math.min(player.getWorld().getMaxHeight(), revealManager.surfaceScrambleMaxY());
-    if (revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ)
-        && y >= revealManager.surfaceScrambleStartY()
-        && y < surfaceTop) {
-      if (revealManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
-        return false;
-      }
-      int flatY = chunkFlatYFromWorld(player.getWorld(), chunkX, chunkZ, salt);
-      int hideDepth = Math.max(0, revealManager.surfaceHideDepth());
-      int hideBelow = Math.max(revealManager.surfaceScrambleStartY(), flatY - hideDepth);
-      if (y > flatY) {
-        wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.airId()));
-        return true;
-      }
-      if (y >= hideBelow) {
-        wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.stoneId()));
-        return true;
-      }
-      return false;
-    }
     if (y < floorY) {
       if (revealManager.isCaveBlockVisible(player, x, y, z)
           || revealManager.isWithinRevealRange(player, x, y, z, 10)
@@ -245,153 +199,6 @@ public final class DeepslateProtection {
     return upperY > floorY && blockY < upperY && !upperRevealed;
   }
 
-  private void fillSurfaceMask(
-      BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
-      int lowY, int highY, int salt, Player player,
-      BaseChunk[] allSections, int minSection) {
-    java.util.UUID playerId = player.getUniqueId();
-    boolean checkGhosts = revealManager.hasAnyGhostBlocks(playerId);
-    int stoneId = blockIds.stoneId();
-    int airId = blockIds.airId();
-    org.bukkit.World world = player.getWorld();
-    int bandStart = Math.max(revealManager.surfaceScrambleStartY(), world.getMinHeight());
-    int bandEnd = Math.min(world.getMaxHeight(), revealManager.surfaceScrambleMaxY());
-    if (bandEnd <= bandStart) {
-      return;
-    }
-    int chunkX = worldOriginX >> 4;
-    int chunkZ = worldOriginZ >> 4;
-    int flatY = chunkFlatYFromPacket(allSections, minSection, chunkX, chunkZ, salt,
-        bandStart, bandEnd - 1);
-    int hideDepth = Math.max(0, revealManager.surfaceHideDepth());
-    int hideBelow = Math.max(bandStart, flatY - hideDepth);
-
-    int airFrom = Math.max(lowY, (flatY + 1) - worldOriginY);
-    int stoneTo = Math.min(highY, (flatY + 1) - worldOriginY);
-    int stoneFrom = Math.max(lowY, hideBelow - worldOriginY);
-    if (airFrom >= highY && stoneFrom >= stoneTo) {
-      return;
-    }
-
-    for (int x = 0; x < 16; x++) {
-      int worldX = worldOriginX + x;
-      for (int z = 0; z < 16; z++) {
-        int worldZ = worldOriginZ + z;
-        for (int y = stoneFrom; y < stoneTo; y++) {
-          if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldOriginY + y, worldZ)) {
-            continue;
-          }
-          section.set(x, y, z, stoneId);
-        }
-        for (int y = airFrom; y < highY; y++) {
-          if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldOriginY + y, worldZ)) {
-            continue;
-          }
-          section.set(x, y, z, airId);
-        }
-      }
-    }
-  }
-
-  private int chunkFlatYFromPacket(BaseChunk[] sections, int minSection, int chunkX, int chunkZ,
-      int salt, int worldMin, int worldMax) {
-    int mix = sampleMix(chunkX, chunkZ, salt);
-    int sx = mix & 15;
-    int sz = (mix >>> 4) & 15;
-    return findTerrainHeightmap(sections, minSection, sx, sz, worldMin, worldMax);
-  }
-
-  private int chunkFlatYFromWorld(org.bukkit.World world, int chunkX, int chunkZ, int salt) {
-    int mix = sampleMix(chunkX, chunkZ, salt);
-    int sx = mix & 15;
-    int sz = (mix >>> 4) & 15;
-    int x = (chunkX << 4) + sx;
-    int z = (chunkZ << 4) + sz;
-    try {
-      if (world.isChunkLoaded(chunkX, chunkZ)) {
-        return world.getHighestBlockYAt(x, z, HeightMap.MOTION_BLOCKING_NO_LEAVES);
-      }
-    } catch (Throwable ignored) {
-      try {
-        if (world.isChunkLoaded(chunkX, chunkZ)) {
-          return world.getHighestBlockYAt(x, z);
-        }
-      } catch (Throwable ignored2) {
-      }
-    }
-    return Math.max(world.getMinHeight(), revealManager.surfaceScrambleStartY());
-  }
-
-  private static int sampleMix(int chunkX, int chunkZ, int salt) {
-    int hash = (chunkX * 73428767 ^ chunkZ * 912367) + (salt * 0x45D9F3B);
-    hash ^= (hash >>> 16);
-    hash *= 0x45D9F3B;
-    hash ^= (hash >>> 16);
-    return hash;
-  }
-
-  private int findTerrainHeightmap(
-      BaseChunk[] sections, int minSection, int localX, int localZ,
-      int worldMin, int worldMax) {
-    for (int worldY = worldMax; worldY >= worldMin; worldY--) {
-      int sectionIndex = (worldY >> 4) - minSection;
-      if (sectionIndex < 0 || sectionIndex >= sections.length) {
-        continue;
-      }
-      BaseChunk section = sections[sectionIndex];
-      if (section == null) {
-        /* Unknown; assume solid to avoid hiding terrain. */
-        return worldY;
-      }
-      int id = section.getBlockId(localX, worldY & 15, localZ);
-      if (isTerrainForHeightmap(id)) {
-        return worldY;
-      }
-    }
-    return worldMin;
-  }
-
-  private boolean isTerrainForHeightmap(int globalId) {
-    if (globalId == blockIds.airId()) {
-      return false;
-    }
-    try {
-      WrappedBlockState state = WrappedBlockState.getByGlobalId(
-          blockIds.version(), globalId, false);
-      if (state == null || state.getType() == null) {
-        return false;
-      }
-      String rawName = state.getType().getName();
-      if (rawName == null) {
-        return false;
-      }
-      String name = rawName.toLowerCase(java.util.Locale.ROOT);
-      if ("air".equals(name) || "cave_air".equals(name) || "void_air".equals(name)
-          || "light".equals(name)) {
-        return false;
-      }
-      if (name.contains("leaves") || name.contains("leaf")) {
-        return false;
-      }
-      if (name.endsWith("_log") || name.endsWith("_wood") || name.equals("log")
-          || name.equals("wood") || name.contains("stripped") && (name.contains("log") || name.contains("wood") || name.contains("stem") || name.contains("hyphae"))
-          || name.contains("stem") || name.contains("hyphae")
-          || name.equals("mangrove_roots") || name.equals("muddy_mangrove_roots")
-          || name.equals("bamboo_block") || name.equals("stripped_bamboo_block")) {
-        return false;
-      }
-      if (name.contains("vine") || name.contains("sapling") || name.contains("propagule")
-          || (name.contains("azalea") && !name.contains("leaves"))
-          || name.equals("bee_nest") || name.equals("beehive")
-          || name.equals("mushroom_stem") || name.contains("mushroom_block")
-          || name.equals("cocoa") || name.equals("bamboo")) {
-        return false;
-      }
-      return true;
-    } catch (Throwable ignored) {
-      return true;
-    }
-  }
 
   private void fillNoise(
       BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
@@ -415,9 +222,8 @@ public final class DeepslateProtection {
               && visibleCave.contains(RevealManager.packPos(worldX, worldY, worldZ))) {
             continue;
           }
-          if (preserveSpawners && section.getBlockId(x, y, z) == blockIds.spawnerId()) {
-            continue;
-          }
+          // In unrevealed/masked fills, replace spawners too (they are hidden like other blocks).
+          // Visible spawners are already skipped by reveal-range/cave checks above.
           int geodeBlock = 0;
           if (geodeChunk && geodeBudget[0] > 0) {
             int hash = geodeNoise(worldX, worldY, worldZ, salt);

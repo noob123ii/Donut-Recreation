@@ -2,7 +2,7 @@ logging:
   enabled: true
   fine: true
 
-config-version: 2
+config-version: 3
 
 acsus:
   custom-anticheats: {}
@@ -18,19 +18,14 @@ hider:
   enabled: true
   hide-below-y: 0
   barrier-upper-y: 12
-  # Surface lock hysteresis: going below scramble-below-y arms it, and it stays armed until the
-  # player climbs above scramble-until-above-y. Underground terrain always stays real so mining
-  # works; the surface scramble above only affects the volume above barrier-upper-y.
-  scramble-enabled: true
-  scramble-below-y: 0
-  scramble-until-above-y: 0
-  # While the surface scramble is armed, each chunk is flattened to a terrain heightmap sampled
-  # at a random column: blocks above that level become air, the level and a few blocks below are
-  # replaced with stone, and deeper blocks are left real. The view restores when the lock clears.
-  surface-scramble-enabled: true
-  surface-scramble-max-y: 128
-  surface-scramble-radius: 1
-  surface-hide-depth: 10
+  # Terrain/surface hiding was removed because it caused lag.
+  # Player-placed base blocks at/above placed-hide-above-y are hidden from other players
+  # instantly (packets). Placed containers below chest-hide-below-y are also hidden.
+  placed-hide-enabled: true
+  placed-hide-above-y: 60
+  chest-hide-below-y: 0
+  placed-hide-owner: false
+  hide-detected-containers: true
   spawner-mask-above-y: 9999
   spawner-reveal-distance: 20
   upper-reveal-radius: 1

@@ -84,6 +84,7 @@ import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerSp
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUnloadChunk;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUseBed;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerUpdateEntityNBT;
+import com.notlucy.donutrecreation.baseprotection.PlacedBlockHider;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
 import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection;
@@ -102,6 +103,7 @@ import com.notlucy.donutrecreation.util.LogData;
 public class PacketHider {
 
   private final RevealManager revealManager;
+  private final PlacedBlockHider placedBlockHider;
   private final BlockIdRegistry registry;
   private final PacketAuditManager audit;
   private final AtomicInteger failureCount = new AtomicInteger();
@@ -115,6 +117,7 @@ public class PacketHider {
 
   public PacketHider(RevealManager revealManager) {
     this.revealManager = revealManager;
+    this.placedBlockHider = new PlacedBlockHider(revealManager.plugin());
     this.registry = new BlockIdRegistry();
     this.audit = new PacketAuditManager(revealManager.plugin());
     revealManager.setChunkRevealCallback(this::resendSpawnsForChunk);
@@ -125,12 +128,12 @@ public class PacketHider {
         revealManager, registry);
 
     ChunkDataHandler chunkData = new ChunkDataHandler(revealManager, deepslate, amethyst,
-        blockEntities, oreVisibility);
+        blockEntities, oreVisibility, placedBlockHider, registry);
     UpdateLightHandler updateLight = new UpdateLightHandler(revealManager);
     BlockChangeHandler blockChange = new BlockChangeHandler(revealManager, deepslate, amethyst,
-        oreVisibility);
+        oreVisibility, placedBlockHider, registry);
     this.multiBlockChange = new MultiBlockChangeHandler(revealManager, deepslate, amethyst,
-        oreVisibility);
+        oreVisibility, placedBlockHider, registry);
     SoundDamper sounds = new SoundDamper(revealManager);
     ParticleDamper particles = new ParticleDamper(revealManager);
     ExplosionDamper explosions = new ExplosionDamper(revealManager);
@@ -230,13 +233,26 @@ public class PacketHider {
     registry.rebuild(v);
     LogData.get().info("[hider] cached " + registry.amethystCount()
         + " amethyst states (" + v + ")");
+    placedBlockHider.load();
     listener = new Listener();
     PacketEvents.getAPI().getEventManager().registerListener(listener);
     oreVisibility.start();
     audit.start();
+    Bukkit.getScheduler().runTask(revealManager.plugin(), () -> {
+      try {
+        for (World world : Bukkit.getWorlds()) {
+          for (org.bukkit.Chunk chunk : world.getLoadedChunks()) {
+            placedBlockHider.scanChunk(chunk);
+          }
+        }
+      } catch (Throwable e) {
+        LogData.get().warning("[hider] loaded-chunk container scan failed: " + e);
+      }
+    });
   }
 
   public void unregister() {
+    placedBlockHider.save();
     audit.stop();
     oreVisibility.stop();
     if (listener != null) {
@@ -249,7 +265,6 @@ public class PacketHider {
     revealManager.clearHiddenEntityCache(playerId);
     pendingSpawns.remove(playerId);
     hiddenEntityIds.remove(playerId);
-    revealManager.clearSurfaceScramble(playerId);
   }
 
   public void reload() {
@@ -268,6 +283,10 @@ public class PacketHider {
 
   public RevealManager revealManager() {
     return revealManager;
+  }
+
+  public PlacedBlockHider placedBlockHider() {
+    return placedBlockHider;
   }
 
   public void setGhostBlockManager(
@@ -390,7 +409,7 @@ public class PacketHider {
     if (type == null || position == null) {
       return;
     }
-    if (type == EntityTypes.PLAYER || isRealPlayerEntity(packet.getEntityId())) {
+    if (packet.getEntityId() == player.getEntityId()) {
       return;
     }
     if (!isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
@@ -415,7 +434,7 @@ public class PacketHider {
     if (type == null || position == null) {
       return;
     }
-    if (isRealPlayerEntity(packet.getEntityId())) {
+    if (packet.getEntityId() == player.getEntityId()) {
       return;
     }
     if (!isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
@@ -435,7 +454,7 @@ public class PacketHider {
 
   private void handleSpawnPlayer(PacketSendEvent event, Player player) {
     var packet = new WrapperPlayServerSpawnPlayer(event);
-    if (isRealPlayerEntity(packet.getEntityId())) {
+    if (packet.getEntityId() == player.getEntityId()) {
       return;
     }
     var position = packet.getPosition();

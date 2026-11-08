@@ -19,7 +19,9 @@ package com.notlucy.donutrecreation.baseprotection.renderering;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.wrapper.play.server.WrapperPlayServerChunkData;
 import org.bukkit.entity.Player;
+import com.notlucy.donutrecreation.baseprotection.PlacedBlockHider;
 import com.notlucy.donutrecreation.baseprotection.RevealManager;
+import com.notlucy.donutrecreation.baseprotection.packet.BlockIdRegistry;
 import com.notlucy.donutrecreation.baseprotection.protection.AmethystProtection;
 import com.notlucy.donutrecreation.baseprotection.protection.DeepslateProtection;
 import com.notlucy.donutrecreation.util.LogData;
@@ -30,15 +32,26 @@ public final class ChunkDataHandler {
   private final AmethystProtection amethyst;
   private final BlockEntityDebugProtection blockEntities;
   private final com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility;
+  private final PlacedBlockHider placedBlockHider;
+  private final BlockIdRegistry blockIds;
 
   public ChunkDataHandler(RevealManager revealManager, DeepslateProtection deepslate,
       AmethystProtection amethyst, BlockEntityDebugProtection blockEntities,
       com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility) {
+    this(revealManager, deepslate, amethyst, blockEntities, oreVisibility, null, null);
+  }
+
+  public ChunkDataHandler(RevealManager revealManager, DeepslateProtection deepslate,
+      AmethystProtection amethyst, BlockEntityDebugProtection blockEntities,
+      com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility,
+      PlacedBlockHider placedBlockHider, BlockIdRegistry blockIds) {
     this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
     this.blockEntities = blockEntities;
     this.oreVisibility = oreVisibility;
+    this.placedBlockHider = placedBlockHider;
+    this.blockIds = blockIds;
   }
 
   public boolean handlePacket(PacketSendEvent event, Player player) {
@@ -68,6 +81,13 @@ public final class ChunkDataHandler {
       touched |= oreVisibility.rewriteChunk(wrapper, player);
     } catch (Throwable e) {
       LogData.get().warning("[hider] ore visibility crashed at " + chunkX + "," + chunkZ + ": " + e);
+    }
+    try {
+      if (placedBlockHider != null && blockIds != null) {
+        touched |= placedBlockHider.rewriteChunk(wrapper, player, blockIds);
+      }
+    } catch (Throwable e) {
+      LogData.get().warning("[hider] placed-block hide crashed at " + chunkX + "," + chunkZ + ": " + e);
     }
     if (touched) {
       event.markForReEncode(true);

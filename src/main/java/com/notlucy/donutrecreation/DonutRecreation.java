@@ -108,7 +108,7 @@ public class DonutRecreation extends JavaPlugin {
     PacketEvents.getAPI().load();
   }
 
-  private static final int CONFIG_VERSION = 2;
+  private static final int CONFIG_VERSION = 3;
 
   private void migrateConfigIfStale() {
     try {
@@ -650,11 +650,12 @@ public class DonutRecreation extends JavaPlugin {
       getServer().getPluginManager().registerEvents(revealListener, this);
       revealListener.start();
       getServer().getPluginManager().registerEvents(
-          new SpawnListener(revealManager), this);
-          
+          new SpawnListener(revealManager, packetHider.placedBlockHider()), this);
+
       scheduleSaltRotation(revealManager);
       getLogger().info("Base protection hider enabled (hide below y="
           + revealManager.hideBelowY()
+          + ", placedHide=" + getConfig().getBoolean("hider.placed-hide-enabled", true)
           + ", geodeHide=" + revealManager.geodeHideEnabled()
           + ", verbose=" + revealManager.verboseLogging() + ").");
     } catch (Throwable error) {

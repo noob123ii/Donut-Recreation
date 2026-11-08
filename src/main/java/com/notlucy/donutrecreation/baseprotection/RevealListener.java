@@ -139,11 +139,6 @@ public final class RevealListener implements Listener {
         && destination.getY() <= upperY + 3 && destination.getY() < from.getY();
     boolean approachingFloor = !crossedFloor && destination.getY() >= revealManager.hideBelowY()
         && destination.getY() <= revealManager.hideBelowY() + 3 && destination.getY() < from.getY();
-    int scrambleReleaseY = revealManager.scrambleUntilAboveY();
-    int scrambleArmY = revealManager.scrambleBelowY();
-    boolean crossedScramble = ((from.getY() <= scrambleReleaseY)
-        != (destination.getY() <= scrambleReleaseY))
-        || ((from.getY() <= scrambleArmY) != (destination.getY() <= scrambleArmY));
 
     boolean inProtectedZone = destination.getY() < revealManager.upperBarrierY() + 2;
     boolean movedBlock = from.getBlockX() != destination.getBlockX()
@@ -151,11 +146,11 @@ public final class RevealListener implements Listener {
         || from.getBlockZ() != destination.getBlockZ();
 
     if (!crossedChunk && !crossedFloor && !crossedUpper && !approachingUpper
-        && !approachingFloor && !crossedScramble && !(inProtectedZone && movedBlock)) {
+        && !approachingFloor && !(inProtectedZone && movedBlock)) {
       revealManager.refreshEntityVisibility(player);
       return;
     }
-    if (crossedFloor || crossedUpper || approachingUpper || approachingFloor || crossedScramble
+    if (crossedFloor || crossedUpper || approachingUpper || approachingFloor
         || (inProtectedZone && movedBlock)) {
       revealManager.invalidateRevealThrottle(player.getUniqueId());
       if (crossedFloor) {
