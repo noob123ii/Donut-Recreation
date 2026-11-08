@@ -78,18 +78,25 @@ public final class MultiBlockChangeHandler {
       boolean surfaceBand = maskBase && surfaceLocked
           && blockY >= revealManager.surfaceScrambleStartY() && blockY < surfaceTop;
       if (surfaceBand) {
-        int fakeY = revealManager.fakeSurfaceY(blockX, blockZ, salt);
-        int bandStart = revealManager.surfaceScrambleStartY();
-        if (fakeY < bandStart) {
-          fakeY = bandStart;
+        int heightmapY = Integer.MIN_VALUE;
+        try {
+          if (player.getWorld().isChunkLoaded(blockX >> 4, blockZ >> 4)) {
+            heightmapY = player.getWorld().getHighestBlockYAt(blockX, blockZ);
+          }
+        } catch (Throwable ignored) {
         }
-        if (fakeY >= surfaceTop) {
-          fakeY = surfaceTop - 1;
-        }
-        int want = (blockY == fakeY) ? deepslate.stoneId() : deepslate.airId();
-        if (encodedBlock.getBlockId() != want) {
-          encodedBlock.setBlockId(want);
-          floorFixes++;
+        if (blockY > heightmapY) {
+          int want = deepslate.airId();
+          if (encodedBlock.getBlockId() != want) {
+            encodedBlock.setBlockId(want);
+            floorFixes++;
+          }
+        } else if (blockY == heightmapY) {
+          int want = deepslate.stoneId();
+          if (encodedBlock.getBlockId() != want) {
+            encodedBlock.setBlockId(want);
+            floorFixes++;
+          }
         }
         continue;
       }

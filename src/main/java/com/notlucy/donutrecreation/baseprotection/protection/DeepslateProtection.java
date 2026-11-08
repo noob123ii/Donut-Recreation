@@ -114,13 +114,13 @@ public final class DeepslateProtection {
         modifiedSections++;
       }
       if (surfaceLocked) {
-        /* Underground surface lock: hide real terrain/objects with a flat fake shell.
-         * Everything in the band becomes air except one fake heightmap stone layer per column. */
+        /* Underground surface lock: replace the top terrain layer and clear blocks above it.
+         * Terrain below the heightmap is left intact so the area stays usable and cheap to render. */
         int sFromY = Math.max(0, revealManager.surfaceScrambleStartY() - worldOriginY);
         int sToY = Math.min(16, surfaceTop - worldOriginY);
         if (sToY > sFromY) {
           fillSurfaceMask(section, worldOriginX, worldOriginY, worldOriginZ, sFromY, sToY,
-              salt, player);
+              salt, player, sections, minSection);
           touched = true;
           modifiedSections++;
         }
@@ -198,17 +198,22 @@ public final class DeepslateProtection {
       if (revealManager.hasGhostBlockAt(player.getUniqueId(), x, y, z)) {
         return false;
       }
-      int fakeY = revealManager.fakeSurfaceY(x, z, salt);
-      int bandStart = revealManager.surfaceScrambleStartY();
-      if (fakeY < bandStart) {
-        fakeY = bandStart;
+      int heightmapY = Integer.MIN_VALUE;
+      try {
+        if (player.getWorld().isChunkLoaded(chunkX, chunkZ)) {
+          heightmapY = player.getWorld().getHighestBlockYAt(x, z);
+        }
+      } catch (Throwable ignored) {
       }
-      if (fakeY >= surfaceTop) {
-        fakeY = surfaceTop - 1;
+      if (y > heightmapY) {
+        wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.airId()));
+        return true;
       }
-      int wantId = (y == fakeY) ? blockIds.stoneId() : blockIds.airId();
-      wrapper.setBlockState(WrappedBlockState.getByGlobalId(wantId));
-      return true;
+      if (y == heightmapY) {
+        wrapper.setBlockState(WrappedBlockState.getByGlobalId(blockIds.stoneId()));
+        return true;
+      }
+      return false;
     }
     if (y < floorY) {
       if (revealManager.isCaveBlockVisible(player, x, y, z)
@@ -245,31 +250,35 @@ public final class DeepslateProtection {
 
   private void fillSurfaceMask(
       BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
-      int lowY, int highY, int salt, Player player) {
+      int lowY, int highY, int salt, Player player,
+      BaseChunk[] allSections, int minSection) {
     java.util.UUID playerId = player.getUniqueId();
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(playerId);
     int stoneId = blockIds.stoneId();
     int airId = blockIds.airId();
-    int bandStart = revealManager.surfaceScrambleStartY();
-    int bandEnd = Math.min(player.getWorld().getMaxHeight(), revealManager.surfaceScrambleMaxY());
+    org.bukkit.World world = player.getWorld();
+    int bandStart = Math.max(revealManager.surfaceScrambleStartY(), world.getMinHeight());
+    int bandEnd = Math.min(world.getMaxHeight(), revealManager.surfaceScrambleMaxY());
+    if (bandEnd <= bandStart) {
+      return;
+    }
     for (int x = 0; x < 16; x++) {
       int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = worldOriginZ + z;
-        int fakeY = revealManager.fakeSurfaceY(worldX, worldZ, salt);
-        if (fakeY < bandStart) {
-          fakeY = bandStart;
-        }
-        if (fakeY >= bandEnd) {
-          fakeY = bandEnd - 1;
-        }
+        int heightmapY = findHeightmap(allSections, minSection, x, z, bandStart, bandEnd - 1);
         for (int y = lowY; y < highY; y++) {
           int worldY = worldOriginY + y;
           if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
             continue;
           }
-          int want = (worldY == fakeY) ? stoneId : airId;
-          section.set(x, y, z, want);
+          if (worldY > heightmapY) {
+            if (section.getBlockId(x, y, z) != airId) {
+              section.set(x, y, z, airId);
+            }
+          } else if (worldY == heightmapY) {
+            section.set(x, y, z, stoneId);
+          }
         }
       }
     }

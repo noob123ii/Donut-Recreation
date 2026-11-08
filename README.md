@@ -109,13 +109,13 @@ The base hider rewrites outgoing packets — it doesn’t edit the world. The go
 
 ### Current surface scramble behavior
 
-When the surface scramble is active, the masked surface band is sent as a **flat fake shell** instead of solid fill:
+When the surface scramble is active, the plugin masks the surface band per column using the chunk’s heightmap:
 
-- blocks **above** the fake surface level become **air**
-- the fake surface level becomes a **stone** layer
-- blocks **below** that fake surface (within the band) become **air**
+- blocks **above the heightmap** (highest point in that column) become **air** if they aren’t already
+- the **heightmap/top terrain block** is **replaced with stone** (hides the real surface/build top)
+- blocks **below the heightmap** in that band are left as-is, so the area stays usable and less laggy
 
-That keeps the real terrain/builds hidden and makes the surface look intentionally “off”. Real underground terrain/ores aren’t the target of that surface band; mining visibility is handled by the reveal logic.
+That hides surface builds and flattens the visible top layer without hollowing out the whole band. Normal mining/visibility rules still handle what players should see underground.
 
 ### Other hiding behavior
 

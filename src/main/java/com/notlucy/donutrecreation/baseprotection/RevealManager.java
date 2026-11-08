@@ -664,7 +664,6 @@ public class RevealManager {
     BlockData airBlock = Material.AIR.createBlockData();
     UUID playerId = player.getUniqueId();
     boolean checkGhosts = hasAnyGhostBlocks(playerId);
-    int salt = getPlayerSalt(playerId);
     int baseX = chunkX << 4;
     int baseZ = chunkZ << 4;
     final int batchSize = 4096;
@@ -674,26 +673,32 @@ public class RevealManager {
       int worldX = baseX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = baseZ + z;
-        int fakeY = fakeSurfaceY(worldX, worldZ, salt);
-        if (fakeY < fromY) {
-          fakeY = fromY;
-        }
-        if (fakeY >= toY) {
-          fakeY = toY - 1;
+        int heightmapY;
+        try {
+          heightmapY = snapshot.getHighestBlockYAt(x & 15, z & 15);
+        } catch (Throwable ignored) {
+          heightmapY = world.getMinHeight();
         }
         for (int y = fromY; y < toY; y++) {
           if (checkGhosts
               && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
             continue;
           }
-          BlockData data;
+          BlockData data = null;
           if (mask) {
-            data = (y == fakeY) ? stoneBlock : airBlock;
+            if (y > heightmapY) {
+              data = airBlock;
+            } else if (y == heightmapY) {
+              data = stoneBlock;
+            }
           } else {
             data = snapshot.getBlockData(x & 15, y, z & 15);
             if (isGeodeMaterial(data.getMaterial())) {
               data = maskBlock;
             }
+          }
+          if (data == null) {
+            continue;
           }
           batch.put(new Location(world, worldX, y, worldZ), data);
           if (++n >= batchSize) {
