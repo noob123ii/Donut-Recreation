@@ -456,9 +456,6 @@ public class RevealManager {
       Long last = lastSurfaceTransitionMs.get(playerId);
       if (last == null || (now - last) >= SURFACE_TRANSITION_COOLDOWN_MS) {
         lastSurfaceTransitionMs.put(playerId, now);
-        if (nowLocked) {
-          fullSurfaceMask.add(playerId);
-        }
         applySurfaceScramble(player, nowLocked);
       } else {
         /* Revert the transient flip; the hysteresis state will settle after cooldown. */
@@ -468,11 +465,9 @@ public class RevealManager {
           scrambledPlayers.remove(playerId);
         }
       }
-    } else if (nowLocked) {
-      /* Covers newly loaded/sent chunks; cheap when everything is already masked. */
-      fullSurfaceMask.add(playerId);
-      applySurfaceScramble(player, true);
     }
+    /* While locked, chunk packet rewriting masks newly sent chunks. Avoid re-scanning all
+     * loaded chunks on every refresh; use /donut xray rescan for a full re-apply. */
 
     if (isRevealThrottled(playerId, playerChunkX, playerChunkZ, playerY)) {
       refreshGeodeVisibility(player);
@@ -598,18 +593,22 @@ public class RevealManager {
         }
       }
     } else {
-      /* Fallback: treat as full cover (the user requested all loaded chunks). */
-      fullSurfaceMask.add(playerId);
-      for (Chunk loadedChunk : world.getLoadedChunks()) {
-        int chunkX = loadedChunk.getX();
-        int chunkZ = loadedChunk.getZ();
-        if (!wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
-          continue;
-        }
-        long key = chunkKey(chunkX, chunkZ);
-        if (maskedChunks.add(key)) {
-          sendSurfaceBand(player, chunkX, chunkZ, true);
-          changed++;
+      int centerX = player.getLocation().getBlockX() >> 4;
+      int centerZ = player.getLocation().getBlockZ() >> 4;
+      int radius = Math.max(0, surfaceScrambleRadius);
+      for (int dx = -radius; dx <= radius; dx++) {
+        for (int dz = -radius; dz <= radius; dz++) {
+          int chunkX = centerX + dx;
+          int chunkZ = centerZ + dz;
+          if (!world.isChunkLoaded(chunkX, chunkZ)
+              || !wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
+            continue;
+          }
+          long key = chunkKey(chunkX, chunkZ);
+          if (maskedChunks.add(key)) {
+            sendSurfaceBand(player, chunkX, chunkZ, true);
+            changed++;
+          }
         }
       }
     }
