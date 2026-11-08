@@ -265,24 +265,29 @@ public final class DeepslateProtection {
         bandStart, bandEnd - 1);
     int hideDepth = Math.max(0, revealManager.surfaceHideDepth());
     int hideBelow = Math.max(bandStart, flatY - hideDepth);
+
+    int airFrom = Math.max(lowY, (flatY + 1) - worldOriginY);
+    int stoneTo = Math.min(highY, (flatY + 1) - worldOriginY);
+    int stoneFrom = Math.max(lowY, hideBelow - worldOriginY);
+    if (airFrom >= highY && stoneFrom >= stoneTo) {
+      return;
+    }
+
     for (int x = 0; x < 16; x++) {
       int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = worldOriginZ + z;
-        for (int y = lowY; y < highY; y++) {
-          int worldY = worldOriginY + y;
-          if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
+        for (int y = stoneFrom; y < stoneTo; y++) {
+          if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldOriginY + y, worldZ)) {
             continue;
           }
-          if (worldY > flatY) {
-            if (section.getBlockId(x, y, z) != airId) {
-              section.set(x, y, z, airId);
-            }
-          } else if (worldY >= hideBelow) {
-            if (section.getBlockId(x, y, z) != stoneId) {
-              section.set(x, y, z, stoneId);
-            }
+          section.set(x, y, z, stoneId);
+        }
+        for (int y = airFrom; y < highY; y++) {
+          if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldOriginY + y, worldZ)) {
+            continue;
           }
+          section.set(x, y, z, airId);
         }
       }
     }

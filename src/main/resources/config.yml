@@ -30,7 +30,7 @@ hider:
   surface-scramble-enabled: true
   surface-scramble-max-y: 128
   surface-scramble-radius: 1
-  surface-hide-depth: 4
+  surface-hide-depth: 10
   spawner-mask-above-y: 9999
   spawner-reveal-distance: 20
   upper-reveal-radius: 1

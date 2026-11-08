@@ -144,8 +144,8 @@ public class RevealManager {
         cfg.getInt("hider.surface-scramble-max-y", 128));
     this.surfaceScrambleRadius = Math.max(0, Math.min(6,
         cfg.getInt("hider.surface-scramble-radius", 1)));
-    this.surfaceHideDepth = Math.max(0, Math.min(16,
-        cfg.getInt("hider.surface-hide-depth", 4)));
+    this.surfaceHideDepth = Math.max(0, Math.min(32,
+        cfg.getInt("hider.surface-hide-depth", 10)));
     this.upperRevealRadius = Math.max(1, cfg.getInt("hider.upper-reveal-radius", 1));
     this.worldMinY         = cfg.getInt("hider.world-min-y", -64);
     this.initialRadius     = cfg.getInt("hider.reveal-initial-radius", 3);
@@ -726,39 +726,59 @@ public class RevealManager {
     int n = 0;
     int salt = getPlayerSalt(playerId);
     int flatY = chunkFlatY(snapshot, world, chunkX, chunkZ, salt);
-    int hideBelow = Math.max(fromY, flatY - Math.max(0, surfaceHideDepth));
+    int hideDepth = Math.max(0, surfaceHideDepth);
+    int hideBelow = Math.max(fromY, flatY - hideDepth);
+    int airFrom = Math.max(fromY, flatY + 1);
+    int stoneTo = Math.min(toY, flatY + 1);
+    int stoneFrom = Math.max(fromY, hideBelow);
     for (int x = 0; x < 16; x++) {
       int worldX = baseX + x;
       for (int z = 0; z < 16; z++) {
         int worldZ = baseZ + z;
-        for (int y = fromY; y < toY; y++) {
-          if (checkGhosts
-              && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
-            continue;
-          }
-          BlockData data;
-          if (mask) {
-            if (y > flatY) {
-              data = airBlock;
-            } else if (y >= hideBelow) {
-              data = stoneBlock;
-            } else {
-              data = snapshot.getBlockData(x & 15, y, z & 15);
-              if (isGeodeMaterial(data.getMaterial())) {
-                data = maskBlock;
-              }
+        if (mask) {
+          for (int y = stoneFrom; y < stoneTo; y++) {
+            if (checkGhosts
+                && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
+              continue;
             }
-          } else {
-            data = snapshot.getBlockData(x & 15, y, z & 15);
+            batch.put(new Location(world, worldX, y, worldZ), stoneBlock);
+            if (++n >= batchSize) {
+              player.sendMultiBlockChange(batch);
+              batch.clear();
+              n = 0;
+            }
+          }
+          for (int y = airFrom; y < toY; y++) {
+            if (checkGhosts
+                && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
+              continue;
+            }
+            batch.put(new Location(world, worldX, y, worldZ), airBlock);
+            if (++n >= batchSize) {
+              player.sendMultiBlockChange(batch);
+              batch.clear();
+              n = 0;
+            }
+          }
+        } else {
+          for (int y = stoneFrom; y < toY; y++) {
+            if (y >= stoneTo && y < airFrom) {
+              continue;
+            }
+            if (checkGhosts
+                && ghostBlockManager.hasGhostBlockAt(playerId, worldX, y, worldZ)) {
+              continue;
+            }
+            BlockData data = snapshot.getBlockData(x & 15, y, z & 15);
             if (isGeodeMaterial(data.getMaterial())) {
               data = maskBlock;
             }
-          }
-          batch.put(new Location(world, worldX, y, worldZ), data);
-          if (++n >= batchSize) {
-            player.sendMultiBlockChange(batch);
-            batch.clear();
-            n = 0;
+            batch.put(new Location(world, worldX, y, worldZ), data);
+            if (++n >= batchSize) {
+              player.sendMultiBlockChange(batch);
+              batch.clear();
+              n = 0;
+            }
           }
         }
       }
