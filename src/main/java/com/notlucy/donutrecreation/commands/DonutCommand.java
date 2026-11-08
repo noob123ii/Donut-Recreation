@@ -124,8 +124,11 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
           sender.sendMessage(plugin.color("&cThis subcommand can only be run by a player."));
           return true;
         }
-        hiderManager.refreshSurfaceScramble(player);
-        sender.sendMessage(plugin.color("&aSurface mask refreshed for all loaded chunks."));
+        if (!hiderManager.refreshSurfaceScramble(player)) {
+          sender.sendMessage(plugin.color("&cRescan is on cooldown or unavailable. Wait a few seconds and try again."));
+          return true;
+        }
+        sender.sendMessage(plugin.color("&aSurface mask rescan started (batched)."));
         return true;
       }
       Player player = sender instanceof Player p ? p : null;

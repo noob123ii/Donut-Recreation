@@ -81,6 +81,8 @@ public class RevealManager {
   private final ConcurrentMap<UUID, Set<Long>> cachedCaveFlood        = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, long[]>   lastRevealRefresh  = new ConcurrentHashMap<>();
   private final ConcurrentMap<UUID, Integer>  playerSalts          = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Long>     lastRescanMs         = new ConcurrentHashMap<>();
+  private final ConcurrentMap<UUID, Integer>  rescanTasks          = new ConcurrentHashMap<>();
 
   private final int     floorY;
   private final int     upperY;
@@ -500,11 +502,22 @@ public class RevealManager {
    * Full re-apply used by {@code /donut xray rescan}: switches the player to whole-world mode
    * while locked, or restores everything currently masked while unlocked.
    */
-  public void refreshSurfaceScramble(Player player) {
-    if (!surfaceScrambleEnabled || player == null) {
-      return;
+  public boolean refreshSurfaceScramble(Player player) {
+    if (!surfaceScrambleEnabled || player == null || !player.isOnline()) {
+      return false;
     }
     UUID playerId = player.getUniqueId();
+    long now = System.currentTimeMillis();
+    Long last = lastRescanMs.get(playerId);
+    if (last != null && (now - last) < 10_000L) {
+      return false;
+    }
+    lastRescanMs.put(playerId, now);
+    Integer existing = rescanTasks.remove(playerId);
+    if (existing != null) {
+      Bukkit.getScheduler().cancelTask(existing);
+    }
+
     boolean locked = isScrambleLocked(player);
     if (locked) {
       scrambledPlayers.add(playerId);
@@ -512,7 +525,8 @@ public class RevealManager {
     } else {
       scrambledPlayers.remove(playerId);
     }
-    applySurfaceScramble(player, locked);
+    applySurfaceScrambleBatched(player, locked);
+    return true;
   }
 
   /** Drops transient surface state when a player leaves. */
@@ -522,6 +536,11 @@ public class RevealManager {
       fullSurfaceMask.remove(playerId);
       surfaceMaskedChunks.remove(playerId);
       lastSurfaceTransitionMs.remove(playerId);
+      lastRescanMs.remove(playerId);
+      Integer task = rescanTasks.remove(playerId);
+      if (task != null) {
+        Bukkit.getScheduler().cancelTask(task);
+      }
     }
   }
 
@@ -616,6 +635,107 @@ public class RevealManager {
       LogData.get().info("[hider] surface mask " + changed + " chunks in "
           + ((System.nanoTime() - started) / 1_000_000L) + "ms");
     }
+  }
+
+  private void applySurfaceScrambleBatched(Player player, boolean mask) {
+    if (!surfaceScrambleEnabled || player == null || !player.isOnline()) {
+      return;
+    }
+    UUID playerId = player.getUniqueId();
+    World world = player.getWorld();
+    if (world == null) {
+      return;
+    }
+    Set<Long> maskedChunks = surfaceMaskedChunks.computeIfAbsent(
+        playerId, ignoredKey -> ConcurrentHashMap.newKeySet());
+
+    java.util.ArrayDeque<long[]> work = new java.util.ArrayDeque<>();
+    if (!mask) {
+      for (long key : maskedChunks.toArray(new Long[0])) {
+        int chunkX = keyX(key);
+        int chunkZ = keyZ(key);
+        if (wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
+          work.add(new long[]{chunkKey(chunkX, chunkZ)});
+        } else {
+          maskedChunks.remove(key);
+        }
+      }
+      fullSurfaceMask.remove(playerId);
+    } else if (fullSurfaceMask.contains(playerId)) {
+      for (Chunk loadedChunk : world.getLoadedChunks()) {
+        int chunkX = loadedChunk.getX();
+        int chunkZ = loadedChunk.getZ();
+        if (wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
+          work.add(new long[]{chunkKey(chunkX, chunkZ)});
+        }
+      }
+    } else {
+      int centerX = player.getLocation().getBlockX() >> 4;
+      int centerZ = player.getLocation().getBlockZ() >> 4;
+      int radius = Math.max(0, surfaceScrambleRadius);
+      for (int dx = -radius; dx <= radius; dx++) {
+        for (int dz = -radius; dz <= radius; dz++) {
+          int chunkX = centerX + dx;
+          int chunkZ = centerZ + dz;
+          if (world.isChunkLoaded(chunkX, chunkZ)
+              && wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
+            work.add(new long[]{chunkKey(chunkX, chunkZ)});
+          }
+        }
+      }
+    }
+
+    if (work.isEmpty()) {
+      return;
+    }
+
+    final int perTick = 2;
+    org.bukkit.scheduler.BukkitRunnable runnable = new org.bukkit.scheduler.BukkitRunnable() {
+      @Override
+      public void run() {
+        if (!player.isOnline() || !player.getUniqueId().equals(playerId)) {
+          rescanTasks.remove(playerId);
+          cancel();
+          return;
+        }
+        World currentWorld = player.getWorld();
+        if (currentWorld == null) {
+          rescanTasks.remove(playerId);
+          cancel();
+          return;
+        }
+        for (int i = 0; i < perTick && !work.isEmpty(); i++) {
+          long[] item = work.poll();
+          if (item == null) {
+            break;
+          }
+          int chunkX = keyX(item[0]);
+          int chunkZ = keyZ(item[0]);
+          if (!currentWorld.isChunkLoaded(chunkX, chunkZ)
+              || !wasChunkDeliveredTo(playerId, chunkX, chunkZ)) {
+            if (!mask) {
+              maskedChunks.remove(item[0]);
+            }
+            continue;
+          }
+          try {
+            sendSurfaceBand(player, chunkX, chunkZ, mask);
+            if (mask) {
+              maskedChunks.add(item[0]);
+            } else {
+              maskedChunks.remove(item[0]);
+            }
+          } catch (Throwable ignored) {
+          }
+        }
+        if (work.isEmpty()) {
+          rescanTasks.remove(playerId);
+          cancel();
+        }
+      }
+    };
+    runnable.runTaskTimer(plugin, 1L, 1L);
+    rescanTasks.put(playerId, runnable.getTaskId());
   }
 
   private boolean isChunkWithin(Player player, long chunkKeyValue, int radius) {
@@ -859,6 +979,11 @@ public class RevealManager {
     surfaceMaskedChunks.remove(playerId);
     fullSurfaceMask.remove(playerId);
     lastSurfaceTransitionMs.remove(playerId);
+    lastRescanMs.remove(playerId);
+    Integer task = rescanTasks.remove(playerId);
+    if (task != null) {
+      Bukkit.getScheduler().cancelTask(task);
+    }
     lastRevealRangeCenter.remove(playerId);
   }
 
@@ -1664,6 +1789,11 @@ public class RevealManager {
     surfaceMaskedChunks.remove(playerId);
     fullSurfaceMask.remove(playerId);
     lastSurfaceTransitionMs.remove(playerId);
+    lastRescanMs.remove(playerId);
+    Integer rescanTask = rescanTasks.remove(playerId);
+    if (rescanTask != null) {
+      Bukkit.getScheduler().cancelTask(rescanTask);
+    }
     lastRevealRangeCenter.remove(playerId);
   }
 
