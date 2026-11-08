@@ -114,13 +114,13 @@ public final class DeepslateProtection {
         modifiedSections++;
       }
       if (surfaceLocked) {
-        /* Underground surface lock: hide the real terrain/objects but keep rendering cheap.
-         * Everything in the band becomes air except one fake "heightmap" layer per column. */
+        /* Underground surface lock: hide real terrain/objects with a flat fake shell.
+         * Everything in the band becomes air except one fake heightmap stone layer per column. */
         int sFromY = Math.max(0, revealManager.surfaceScrambleStartY() - worldOriginY);
         int sToY = Math.min(16, surfaceTop - worldOriginY);
         if (sToY > sFromY) {
           fillSurfaceMask(section, worldOriginX, worldOriginY, worldOriginZ, sFromY, sToY,
-              salt, player, sections, minSection, player.getWorld());
+              salt, player);
           touched = true;
           modifiedSections++;
         }
@@ -245,14 +245,13 @@ public final class DeepslateProtection {
 
   private void fillSurfaceMask(
       BaseChunk section, int worldOriginX, int worldOriginY, int worldOriginZ,
-      int lowY, int highY, int salt, Player player,
-      BaseChunk[] allSections, int minSection, org.bukkit.World world) {
+      int lowY, int highY, int salt, Player player) {
     java.util.UUID playerId = player.getUniqueId();
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(playerId);
     int stoneId = blockIds.stoneId();
     int airId = blockIds.airId();
     int bandStart = revealManager.surfaceScrambleStartY();
-    int bandEnd = Math.min(world.getMaxHeight(), revealManager.surfaceScrambleMaxY());
+    int bandEnd = Math.min(player.getWorld().getMaxHeight(), revealManager.surfaceScrambleMaxY());
     for (int x = 0; x < 16; x++) {
       int worldX = worldOriginX + x;
       for (int z = 0; z < 16; z++) {
@@ -269,12 +268,7 @@ public final class DeepslateProtection {
           if (checkGhosts && revealManager.hasGhostBlockAt(playerId, worldX, worldY, worldZ)) {
             continue;
           }
-          int want;
-          if (worldY == fakeY) {
-            want = stoneId;
-          } else {
-            want = airId;
-          }
+          int want = (worldY == fakeY) ? stoneId : airId;
           section.set(x, y, z, want);
         }
       }
