@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.baseprotection.renderering;
 
 import com.github.retrooper.packetevents.event.PacketSendEvent;
@@ -13,13 +29,16 @@ public final class ChunkDataHandler {
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
   private final BlockEntityDebugProtection blockEntities;
+  private final com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility;
 
   public ChunkDataHandler(RevealManager revealManager, DeepslateProtection deepslate,
-      AmethystProtection amethyst, BlockEntityDebugProtection blockEntities) {
+      AmethystProtection amethyst, BlockEntityDebugProtection blockEntities,
+      com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility) {
     this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
     this.blockEntities = blockEntities;
+    this.oreVisibility = oreVisibility;
   }
 
   public boolean handlePacket(PacketSendEvent event, Player player) {
@@ -44,6 +63,11 @@ public final class ChunkDataHandler {
       touched |= blockEntities.scrubChunk(wrapper.getColumn(), player, chunkX, chunkZ);
     } catch (Throwable e) {
       LogData.get().warning("[hider] tile scrub crashed at " + chunkX + "," + chunkZ + ": " + e);
+    }
+    try {
+      touched |= oreVisibility.rewriteChunk(wrapper, player);
+    } catch (Throwable e) {
+      LogData.get().warning("[hider] ore visibility crashed at " + chunkX + "," + chunkZ + ": " + e);
     }
     if (touched) {
       event.markForReEncode(true);

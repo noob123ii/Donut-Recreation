@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.punish.listeners;
 
 import com.notlucy.donutrecreation.DonutRecreation;
@@ -127,12 +143,12 @@ public final class AltBanListener implements Listener {
     try {
       String linked = other.name == null ? other.uuid.toString() : other.name;
       plugin.susFlagManager().flag(playerId, name,
-          "Shares IP with banned " + linked + " (" + other.reason + ") — alt " + altCount + "/" + threshold);
+          "Shares IP with banned " + linked + " (" + other.reason + ") â€” alt " + altCount + "/" + threshold);
       Bukkit.getScheduler().runTask(plugin, () -> Bukkit.getOnlinePlayers().stream()
           .filter(p -> p.hasPermission("donutrecreation.*"))
           .forEach(op -> op.sendMessage(plugin.color(
               "&e[&6ALT&e] &f" + name + " &7shares IP with banned &f" + linked
-                  + " &7(&f" + other.reason + "&7) &ealt " + altCount + "/" + threshold + " — flagged"))));
+                  + " &7(&f" + other.reason + "&7) &ealt " + altCount + "/" + threshold + " â€” flagged"))));
     } catch (Throwable ignored) {
     }
   }

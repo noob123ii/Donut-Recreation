@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.baseprotection.packet;
 
 import java.util.EnumMap;
@@ -10,6 +26,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
+import org.bukkit.Bukkit;
+import org.bukkit.World;
 import org.bukkit.entity.Player;
 
 import com.github.retrooper.packetevents.PacketEvents;
@@ -18,6 +36,7 @@ import com.github.retrooper.packetevents.event.PacketListenerPriority;
 import com.github.retrooper.packetevents.event.PacketSendEvent;
 import com.github.retrooper.packetevents.netty.buffer.ByteBufHelper;
 import com.github.retrooper.packetevents.protocol.entity.type.EntityType;
+import com.github.retrooper.packetevents.protocol.entity.type.EntityTypes;
 import com.github.retrooper.packetevents.protocol.packettype.PacketType;
 import com.github.retrooper.packetevents.protocol.player.ClientVersion;
 import com.github.retrooper.packetevents.protocol.world.Direction;
@@ -91,6 +110,7 @@ public class PacketHider {
   private final Map<PacketType.Play.Server, BiConsumer<PacketSendEvent, Player>> handlers =
       new EnumMap<>(PacketType.Play.Server.class);
   private MultiBlockChangeHandler multiBlockChange;
+  private final com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility;
   private PacketListenerAbstract listener;
 
   public PacketHider(RevealManager revealManager) {
@@ -101,11 +121,16 @@ public class PacketHider {
     DeepslateProtection deepslate = new DeepslateProtection(revealManager, registry);
     AmethystProtection amethyst = new AmethystProtection(revealManager, registry);
     BlockEntityDebugProtection blockEntities = new BlockEntityDebugProtection(revealManager);
+    this.oreVisibility = new com.notlucy.donutrecreation.baseprotection.protection.OreVisibility(
+        revealManager, registry);
 
-    ChunkDataHandler chunkData = new ChunkDataHandler(revealManager, deepslate, amethyst, blockEntities);
+    ChunkDataHandler chunkData = new ChunkDataHandler(revealManager, deepslate, amethyst,
+        blockEntities, oreVisibility);
     UpdateLightHandler updateLight = new UpdateLightHandler(revealManager);
-    BlockChangeHandler blockChange = new BlockChangeHandler(revealManager, deepslate, amethyst);
-    this.multiBlockChange = new MultiBlockChangeHandler(revealManager, deepslate, amethyst);
+    BlockChangeHandler blockChange = new BlockChangeHandler(revealManager, deepslate, amethyst,
+        oreVisibility);
+    this.multiBlockChange = new MultiBlockChangeHandler(revealManager, deepslate, amethyst,
+        oreVisibility);
     SoundDamper sounds = new SoundDamper(revealManager);
     ParticleDamper particles = new ParticleDamper(revealManager);
     ExplosionDamper explosions = new ExplosionDamper(revealManager);
@@ -207,11 +232,13 @@ public class PacketHider {
         + " amethyst states (" + v + ")");
     listener = new Listener();
     PacketEvents.getAPI().getEventManager().registerListener(listener);
+    oreVisibility.start();
     audit.start();
   }
 
   public void unregister() {
     audit.stop();
+    oreVisibility.stop();
     if (listener != null) {
       PacketEvents.getAPI().getEventManager().unregisterListener(listener);
       listener = null;
@@ -222,6 +249,7 @@ public class PacketHider {
     revealManager.clearHiddenEntityCache(playerId);
     pendingSpawns.remove(playerId);
     hiddenEntityIds.remove(playerId);
+    revealManager.clearSurfaceScramble(playerId);
   }
 
   public void reload() {
@@ -236,6 +264,10 @@ public class PacketHider {
 
   public PacketAuditManager audit() {
     return audit;
+  }
+
+  public RevealManager revealManager() {
+    return revealManager;
   }
 
   public void setGhostBlockManager(
@@ -342,11 +374,26 @@ public class PacketHider {
     });
   }
 
+  private boolean isRealPlayerEntity(int entityId) {
+    for (Player online : Bukkit.getOnlinePlayers()) {
+      if (online.getEntityId() == entityId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   private void handleSpawnEntity(PacketSendEvent event, Player player) {
     var packet = new WrapperPlayServerSpawnEntity(event);
     var type = packet.getEntityType();
     var position = packet.getPosition();
-    if (type == null || position == null || !isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
+    if (type == null || position == null) {
+      return;
+    }
+    if (type == EntityTypes.PLAYER || isRealPlayerEntity(packet.getEntityId())) {
+      return;
+    }
+    if (!isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
       return;
     }
     int entityId = packet.getEntityId();
@@ -365,7 +412,13 @@ public class PacketHider {
     var packet = new WrapperPlayServerSpawnLivingEntity(event);
     var type = packet.getEntityType();
     var position = packet.getPosition();
-    if (type == null || position == null || !isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
+    if (type == null || position == null) {
+      return;
+    }
+    if (isRealPlayerEntity(packet.getEntityId())) {
+      return;
+    }
+    if (!isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
       return;
     }
     int entityId = packet.getEntityId();
@@ -382,6 +435,9 @@ public class PacketHider {
 
   private void handleSpawnPlayer(PacketSendEvent event, Player player) {
     var packet = new WrapperPlayServerSpawnPlayer(event);
+    if (isRealPlayerEntity(packet.getEntityId())) {
+      return;
+    }
     var position = packet.getPosition();
     if (position == null || !isHiddenBlock(player, position.getX(), position.getY(), position.getZ())) {
       return;

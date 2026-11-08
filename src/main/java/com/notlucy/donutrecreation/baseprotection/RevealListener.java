@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.baseprotection;
 
 import java.io.ByteArrayOutputStream;
@@ -73,11 +89,22 @@ public final class RevealListener implements Listener {
         return;
       }
     }
-    int blockY    = block.getY();
+    int blockY = block.getY();
     int floor = revealManager.hideBelowY();
     if (blockY <= floor) {
-      revealManager.revealAround(player, block.getX() >> 4, block.getZ() >> 4, revealManager.initialRadius());
-      Bukkit.getScheduler().runTask(revealManager.plugin(), () -> revealManager.refreshRevealState(player));
+      int bx = block.getX();
+      int by = block.getY();
+      int bz = block.getZ();
+      revealManager.revealAtBlock(player, bx, by, bz);
+      Bukkit.getScheduler().runTask(revealManager.plugin(), () -> {
+        if (!player.isOnline()) {
+          return;
+        }
+        /* Re-apply after the block is removed so the newly exposed layer and any
+         * opened cave render reliably. */
+        revealManager.revealAtBlock(player, bx, by, bz);
+        revealManager.refreshRevealState(player);
+      });
     }
   }
 
@@ -112,12 +139,24 @@ public final class RevealListener implements Listener {
         && destination.getY() <= upperY + 3 && destination.getY() < from.getY();
     boolean approachingFloor = !crossedFloor && destination.getY() >= revealManager.hideBelowY()
         && destination.getY() <= revealManager.hideBelowY() + 3 && destination.getY() < from.getY();
+    int scrambleReleaseY = revealManager.scrambleUntilAboveY();
+    int scrambleArmY = revealManager.scrambleBelowY();
+    boolean crossedScramble = ((from.getY() <= scrambleReleaseY)
+        != (destination.getY() <= scrambleReleaseY))
+        || ((from.getY() <= scrambleArmY) != (destination.getY() <= scrambleArmY));
 
-    if (!crossedChunk && !crossedFloor && !crossedUpper && !approachingUpper && !approachingFloor) {
+    boolean inProtectedZone = destination.getY() < revealManager.upperBarrierY() + 2;
+    boolean movedBlock = from.getBlockX() != destination.getBlockX()
+        || from.getBlockY() != destination.getBlockY()
+        || from.getBlockZ() != destination.getBlockZ();
+
+    if (!crossedChunk && !crossedFloor && !crossedUpper && !approachingUpper
+        && !approachingFloor && !crossedScramble && !(inProtectedZone && movedBlock)) {
       revealManager.refreshEntityVisibility(player);
       return;
     }
-    if (crossedFloor || crossedUpper || approachingUpper || approachingFloor) {
+    if (crossedFloor || crossedUpper || approachingUpper || approachingFloor || crossedScramble
+        || (inProtectedZone && movedBlock)) {
       revealManager.invalidateRevealThrottle(player.getUniqueId());
       if (crossedFloor) {
         revealManager.showHiddenEntities(player);

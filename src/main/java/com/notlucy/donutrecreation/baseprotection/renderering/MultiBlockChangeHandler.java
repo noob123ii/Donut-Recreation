@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.baseprotection.renderering;
 
 import com.github.retrooper.packetevents.event.PacketSendEvent;
@@ -12,12 +28,16 @@ public final class MultiBlockChangeHandler {
   private final RevealManager revealManager;
   private final DeepslateProtection deepslate;
   private final AmethystProtection amethyst;
+  private final com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility;
   private GhostBlockManager ghostBlockManager;
 
-  public MultiBlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate, AmethystProtection amethyst) {
+  public MultiBlockChangeHandler(RevealManager revealManager, DeepslateProtection deepslate,
+      AmethystProtection amethyst,
+      com.notlucy.donutrecreation.baseprotection.protection.OreVisibility oreVisibility) {
     this.revealManager = revealManager;
     this.deepslate = deepslate;
     this.amethyst = amethyst;
+    this.oreVisibility = oreVisibility;
   }
 
   public void setGhostBlockManager(GhostBlockManager gbm) {
@@ -40,6 +60,10 @@ public final class MultiBlockChangeHandler {
     int upperY = revealManager.upperBarrierY();
     int spawnerMaskAboveY = revealManager.spawnerMaskAboveY();
     boolean checkGhosts = revealManager.hasAnyGhostBlocks(player.getUniqueId());
+    boolean maskBase = player.getWorld().getEnvironment() == org.bukkit.World.Environment.NORMAL;
+    boolean surfaceLocked = revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ);
+    int surfaceTop = Math.min(player.getWorld().getMaxHeight(),
+        revealManager.surfaceScrambleMaxY());
     int floorFixes = 0, spawnerFixes = 0;
     int spawnerId = deepslate.spawnerId();
 
@@ -51,15 +75,34 @@ public final class MultiBlockChangeHandler {
           && ghostBlockManager.hasGhostBlockAt(player.getUniqueId(), blockX, blockY, blockZ)) {
         continue;
       }
-      boolean belowFloor = blockY < floorY;
-      boolean barrierBand = !belowFloor && blockY < upperY;
+      boolean surfaceBand = maskBase && surfaceLocked
+          && blockY >= revealManager.surfaceScrambleStartY() && blockY < surfaceTop;
+      if (surfaceBand) {
+        int fakeY = revealManager.fakeSurfaceY(blockX, blockZ, salt);
+        int bandStart = revealManager.surfaceScrambleStartY();
+        if (fakeY < bandStart) {
+          fakeY = bandStart;
+        }
+        if (fakeY >= surfaceTop) {
+          fakeY = surfaceTop - 1;
+        }
+        int want = (blockY == fakeY) ? deepslate.stoneId() : deepslate.airId();
+        if (encodedBlock.getBlockId() != want) {
+          encodedBlock.setBlockId(want);
+          floorFixes++;
+        }
+        continue;
+      }
+      boolean belowFloor = maskBase && blockY < floorY;
+      boolean barrierBand = maskBase && !belowFloor && blockY < upperY;
       boolean caveVisible = revealManager.isCaveBlockVisible(player, blockX, blockY, blockZ);
+      boolean inRange = revealManager.isWithinRevealRange(player, blockX, blockY, blockZ, 10);
       boolean visible;
       if (belowFloor) {
-        visible = caveVisible
+        visible = caveVisible || inRange
             || revealManager.isChunkRevealed(player, blockX >> 4, blockZ >> 4);
       } else if (barrierBand) {
-        visible = caveVisible || upperRevealed;
+        visible = caveVisible || inRange || upperRevealed;
       } else {
         visible = true;
       }
@@ -79,9 +122,10 @@ public final class MultiBlockChangeHandler {
         spawnerFixes++;
       }
     }
+    int oreFixes = oreVisibility.rewriteMultiBlock(wrapper, player);
     int amFixes = amethyst.rewriteMultiBlock(wrapper, player, false, floorFixes);
 
-    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0;
+    boolean touched = floorFixes > 0 || spawnerFixes > 0 || amFixes > 0 || oreFixes > 0;
     if (touched) {
       event.markForReEncode(true);
     }

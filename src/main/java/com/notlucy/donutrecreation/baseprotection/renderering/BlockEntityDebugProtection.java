@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.baseprotection.renderering;
 
 import java.lang.reflect.Field;
@@ -84,6 +100,9 @@ public final class BlockEntityDebugProtection {
     }
     int floorY = revealManager.hideBelowY();
     int upperY = revealManager.upperBarrierY();
+    boolean surfaceMasked = revealManager.isSurfaceScrambleNear(player, chunkX, chunkZ);
+    int surfaceStart = revealManager.surfaceScrambleStartY();
+    int surfaceEnd = revealManager.surfaceScrambleMaxY();
 
     List<TileEntity> keep = new ArrayList<>(tiles.length);
     for (TileEntity t : tiles) {
@@ -91,6 +110,9 @@ public final class BlockEntityDebugProtection {
         continue;
       }
       int y = t.getY();
+      if (surfaceMasked && y >= surfaceStart && y < surfaceEnd) {
+        continue;
+      }
       if (y >= upperY) {
         keep.add(t);
         continue;
@@ -117,6 +139,13 @@ public final class BlockEntityDebugProtection {
     var position = wrapper.getPosition();
     int blockY = position.getY();
 
+    if (revealManager.isSurfaceScrambleNear(
+            player, position.getX() >> 4, position.getZ() >> 4)
+        && blockY >= revealManager.surfaceScrambleStartY()
+        && blockY < revealManager.surfaceScrambleMaxY()) {
+      event.setCancelled(true);
+      return;
+    }
     if (!revealManager.isPositionVisible(player, position.getX(), blockY, position.getZ())) {
       event.setCancelled(true);
     }

@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.baseprotection.packet;
 
 import java.util.BitSet;
@@ -46,10 +62,55 @@ public final class BlockIdRegistry {
       StateTypes.RAW_COPPER_BLOCK,
       StateTypes.RAW_GOLD_BLOCK);
 
+  /** Ores that can generate naturally and are safe to hide from X-Ray clients. */
+  private static final Set<StateType> NATURAL_ORE_FAMILY = Set.of(
+      StateTypes.COAL_ORE,
+      StateTypes.DEEPSLATE_COAL_ORE,
+      StateTypes.IRON_ORE,
+      StateTypes.DEEPSLATE_IRON_ORE,
+      StateTypes.GOLD_ORE,
+      StateTypes.DEEPSLATE_GOLD_ORE,
+      StateTypes.COPPER_ORE,
+      StateTypes.DEEPSLATE_COPPER_ORE,
+      StateTypes.REDSTONE_ORE,
+      StateTypes.DEEPSLATE_REDSTONE_ORE,
+      StateTypes.LAPIS_ORE,
+      StateTypes.DEEPSLATE_LAPIS_ORE,
+      StateTypes.DIAMOND_ORE,
+      StateTypes.DEEPSLATE_DIAMOND_ORE,
+      StateTypes.EMERALD_ORE,
+      StateTypes.DEEPSLATE_EMERALD_ORE,
+      StateTypes.ANCIENT_DEBRIS,
+      StateTypes.NETHER_GOLD_ORE,
+      StateTypes.NETHER_QUARTZ_ORE,
+      StateTypes.GILDED_BLACKSTONE);
+
+  private static final Set<StateType> NETHER_ORE_FAMILY = Set.of(
+      StateTypes.NETHER_GOLD_ORE,
+      StateTypes.NETHER_QUARTZ_ORE,
+      StateTypes.ANCIENT_DEBRIS,
+      StateTypes.GILDED_BLACKSTONE);
+
+  private static final Set<StateType> DEEPSLATE_ORE_FAMILY = Set.of(
+      StateTypes.DEEPSLATE_COAL_ORE,
+      StateTypes.DEEPSLATE_IRON_ORE,
+      StateTypes.DEEPSLATE_GOLD_ORE,
+      StateTypes.DEEPSLATE_COPPER_ORE,
+      StateTypes.DEEPSLATE_REDSTONE_ORE,
+      StateTypes.DEEPSLATE_LAPIS_ORE,
+      StateTypes.DEEPSLATE_DIAMOND_ORE,
+      StateTypes.DEEPSLATE_EMERALD_ORE);
+
   private BitSet amethyst;
   private int amethystLen;
   private BitSet ores;
   private int oresLen;
+  private BitSet naturalOres;
+  private int naturalOresLen;
+  private BitSet deepslateOres;
+  private int deepslateOresLen;
+  private BitSet netherOres;
+  private int netherOresLen;
   private BitSet transparentBlocks;
   private int transparentLen;
   private BitSet transparentBlocksSkipLava;
@@ -97,6 +158,9 @@ public final class BlockIdRegistry {
 
     BitSet amethystBits = new BitSet(8192);
     BitSet oreBits = new BitSet(8192);
+    BitSet naturalOreBits = new BitSet(8192);
+    BitSet deepslateOreBits = new BitSet(8192);
+    BitSet netherOreBits = new BitSet(8192);
     BitSet transBits = new BitSet(8192);
     BitSet transBitsSkipLava = new BitSet(8192);
     for (int globalId = 0; globalId < 32768; globalId++) {
@@ -111,6 +175,15 @@ public final class BlockIdRegistry {
         }
         if (ORE_FAMILY.contains(stateType)) {
           oreBits.set(globalId);
+        }
+        if (NATURAL_ORE_FAMILY.contains(stateType)) {
+          naturalOreBits.set(globalId);
+        }
+        if (DEEPSLATE_ORE_FAMILY.contains(stateType)) {
+          deepslateOreBits.set(globalId);
+        }
+        if (NETHER_ORE_FAMILY.contains(stateType)) {
+          netherOreBits.set(globalId);
         }
         boolean isTrans = stateType == StateTypes.AIR || stateType == StateTypes.CAVE_AIR || stateType == StateTypes.VOID_AIR
             || stateType == StateTypes.WATER
@@ -132,6 +205,12 @@ public final class BlockIdRegistry {
     this.amethystLen = amethystBits.length();
     this.ores = oreBits;
     this.oresLen = oreBits.length();
+    this.naturalOres = naturalOreBits;
+    this.naturalOresLen = naturalOreBits.length();
+    this.deepslateOres = deepslateOreBits;
+    this.deepslateOresLen = deepslateOreBits.length();
+    this.netherOres = netherOreBits;
+    this.netherOresLen = netherOreBits.length();
     this.transparentBlocks = transBits;
     this.transparentLen = transBits.length();
     this.transparentBlocksSkipLava = transBitsSkipLava;
@@ -150,6 +229,25 @@ public final class BlockIdRegistry {
   public boolean isOre(int globalId) {
     BitSet bits = ores;
     return bits != null && globalId >= 0 && globalId < oresLen && bits.get(globalId);
+  }
+
+  public int naturalOreCount() {
+    return naturalOres == null ? 0 : naturalOres.cardinality();
+  }
+
+  public boolean isNaturalOre(int globalId) {
+    BitSet bits = naturalOres;
+    return bits != null && globalId >= 0 && globalId < naturalOresLen && bits.get(globalId);
+  }
+
+  public boolean isDeepslateOre(int globalId) {
+    BitSet bits = deepslateOres;
+    return bits != null && globalId >= 0 && globalId < deepslateOresLen && bits.get(globalId);
+  }
+
+  public boolean isNetherOre(int globalId) {
+    BitSet bits = netherOres;
+    return bits != null && globalId >= 0 && globalId < netherOresLen && bits.get(globalId);
   }
 
   public boolean isTransparent(int globalId, boolean skipLava) {

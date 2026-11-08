@@ -1,3 +1,19 @@
+/*
+ * Copyright (C) 2026 Notlucy and Donut Recreation contributors
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
 package com.notlucy.donutrecreation.commands;
 
 import java.util.Collections;
@@ -50,7 +66,8 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       return true;
     }
     if (args.length == 0) {
-      sender.sendMessage(plugin.color("&cUsage: /donut reload | /donut chunk generate <border>"));
+      sender.sendMessage(plugin.color(
+          "&cUsage: /donut reload | /donut chunk generate <border> | /donut xray [rescan]"));
       return true;
     }
     if ("reload".equalsIgnoreCase(args[0])) {
@@ -96,6 +113,27 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       }
       return true;
     }
+    if ("xray".equalsIgnoreCase(args[0])) {
+      var hiderManager = packetHider == null ? null : packetHider.revealManager();
+      if (hiderManager == null) {
+        sender.sendMessage(plugin.color("&cBase hider is not initialized."));
+        return true;
+      }
+      if (args.length > 1 && "rescan".equalsIgnoreCase(args[1])) {
+        if (!(sender instanceof Player player)) {
+          sender.sendMessage(plugin.color("&cThis subcommand can only be run by a player."));
+          return true;
+        }
+        hiderManager.refreshSurfaceScramble(player);
+        sender.sendMessage(plugin.color("&aSurface mask refreshed for all loaded chunks."));
+        return true;
+      }
+      Player player = sender instanceof Player p ? p : null;
+      for (String line : hiderManager.xrayStatus(player)) {
+        sender.sendMessage(plugin.color("&7" + line));
+      }
+      return true;
+    }
     if ("packets".equalsIgnoreCase(args[0])) {
       if (packetAudit == null) {
         sender.sendMessage(plugin.color("&cPacket audit manager is not initialized."));
@@ -111,7 +149,8 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       }
       return true;
     }
-    sender.sendMessage(plugin.color("&cUsage: /donut reload | /donut chunk generate <border>"));
+    sender.sendMessage(plugin.color(
+        "&cUsage: /donut reload | /donut chunk generate <border> | /donut xray [rescan]"));
     return true;
   }
 
@@ -131,6 +170,9 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
       if ("packets".toLowerCase().startsWith(args[0].toLowerCase())) {
         return List.of("packets");
       }
+      if ("xray".toLowerCase().startsWith(args[0].toLowerCase())) {
+        return List.of("xray");
+      }
       return Collections.emptyList();
     }
     if (args.length == 2 && "chunk".equalsIgnoreCase(args[0])) {
@@ -142,6 +184,12 @@ public class DonutCommand implements CommandExecutor, TabCompleter {
     if (args.length == 2 && "packets".equalsIgnoreCase(args[0])) {
       if ("clear".toLowerCase().startsWith(args[1].toLowerCase())) {
         return List.of("clear");
+      }
+      return Collections.emptyList();
+    }
+    if (args.length == 2 && "xray".equalsIgnoreCase(args[0])) {
+      if ("rescan".toLowerCase().startsWith(args[1].toLowerCase())) {
+        return List.of("rescan");
       }
       return Collections.emptyList();
     }
